@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+message: "If you use this software or its ideas, please cite the paper below."
+title: "Aletheia: A Drift-Aware Claim (DAC) Substrate"
+abstract: >-
+  A portable epistemic substrate that wraps every inter-layer artifact in a
+  signed, hash-chained envelope carrying provenance, calibrated (conformal)
+  confidence, a data classification, and a validity window that self-invalidates
+  under input drift, with a monotone-propagation contract enforced as a typed
+  precondition of derivation.
+type: software
+authors:
+  - family-names: "Wooden"
+    given-names: "A. Khaalis"
+    name-suffix: "Sr."
+    email: "aldrich.wooden@snhu.edu"
+    affiliation: "Zuup Innovation Lab / Visionblox LLC; Southern New Hampshire University"
+license: Apache-2.0
+version: "0.1.0"
+date-released: "2026-05-26"
+keywords:
+  - conformal prediction
+  - concept drift
+  - provenance
+  - attestation
+  - compliance
+  - non-stationarity
+  - AI safety
+preferred-citation:
+  type: conference-paper
+  title: "Drift-Aware Attestation: A Portable Epistemic Substrate for Non-Stationary Autonomous Systems"
+  authors:
+    - family-names: "Wooden"
+      given-names: "A. Khaalis"
+      name-suffix: "Sr."
+  year: 2026
