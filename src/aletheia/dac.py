@@ -229,7 +229,12 @@ class ClaimStore:
         self.db.execute(
             "CREATE TABLE IF NOT EXISTS edges(parent TEXT, child TEXT)"
         )
-        self._last_hash = ""
+        # Resume the hash chain from the persisted head so chaining is correct
+        # across separate processes (e.g. one CLI invocation per n8n step).
+        row = self.db.execute(
+            "SELECT rec_hash FROM claims ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+        self._last_hash = row[0] if row else ""
 
     def append(self, dac: DAC) -> DAC:
         dac.prev_hash = self._last_hash
