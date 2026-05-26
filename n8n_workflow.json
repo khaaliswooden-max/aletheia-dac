@@ -1,0 +1,74 @@
+{
+  "name": "Aletheia DAC — sensor→embedding→decision with drift gate",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "command": "python3 -m aletheia.cli issue --db /data/aletheia.db --kind sensor_reading --producer sensor.l0 --classification REGULATED --confidence 0.99 --alpha 0.01 --monitor stream_A --payload \"hr=88\""
+      },
+      "id": "issue",
+      "name": "Issue Sensor DAC",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "notes": "Emits {id,...}. Parse stdout as JSON in the next Set/Code node and capture id."
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = JSON.parse($json[\"stdout\"]);\nreturn [{ json: { sensor_id: out.id } }];"
+      },
+      "id": "parse",
+      "name": "Capture sensor id",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "command": "=python3 -m aletheia.cli derive --db /data/aletheia.db --kind embedding --producer enc.l2 --classification INTERNAL --confidence 0.92 --alpha 0.08 --method split_conformal --parents {{ $json[\"sensor_id\"] }} --payload \"vec\""
+      },
+      "id": "derive",
+      "name": "Derive Embedding DAC",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "command": "python3 -m aletheia.cli verify --db /data/aletheia.db"
+      },
+      "id": "verify",
+      "name": "Verify Audit Chain",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1120, 300],
+      "notes": "Gate: if chain_ok=false, stop and alert (tamper)."
+    },
+    {
+      "parameters": {
+        "command": "python3 -m aletheia.cli export-oscal --db /data/aletheia.db > /data/oscal_results.json && echo '{\"exported\":true}'"
+      },
+      "id": "oscal",
+      "name": "Export OSCAL → Civium",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1340, 300]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {"main": [[{"node": "Issue Sensor DAC", "type": "main", "index": 0}]]},
+    "Issue Sensor DAC": {"main": [[{"node": "Capture sensor id", "type": "main", "index": 0}]]},
+    "Capture sensor id": {"main": [[{"node": "Derive Embedding DAC", "type": "main", "index": 0}]]},
+    "Derive Embedding DAC": {"main": [[{"node": "Verify Audit Chain", "type": "main", "index": 0}]]},
+    "Verify Audit Chain": {"main": [[{"node": "Export OSCAL → Civium", "type": "main", "index": 0}]]}
+  },
+  "settings": {},
+  "comment": "Import via n8n > Workflows > Import from File. Requires `pip install -e .` so `python3 -m aletheia.cli` is on PATH in the n8n host/container. Mount a writable /data volume for the SQLite store. A scheduled DriftMonitor job calls `... cli trip --monitor stream_A` when a stream shift is detected; downstream DACs cascade to STALE automatically."
+}
