@@ -17,8 +17,15 @@ Usage:
   python -m aletheia.cli export-oscal --db store.db > results.json
   python -m aletheia.cli status  --db store.db --id <dac_id>
 
-Note: producer keys are ephemeral per process in this reference CLI. For
-production, load persistent Ed25519 keys from a keystore (see CLAUDE.md).
+Producer keys: pass --keystore DIR to use persistent Ed25519 keys, so a claim
+issued by one invocation can still be verified after the process exits. Without
+it, keys stay ephemeral per process — the legacy default, kept so existing
+callers are unaffected.
+
+To verify a chain from ANY of the five substrates, including the legacy v0
+formats, use the format-detecting verifier:
+
+  python -m aletheia.provenance.verify <artifact> [--pubkey KEY] [--json]
 """
 from __future__ import annotations
 
@@ -57,6 +64,9 @@ def main(argv=None):
         sp.add_argument("--ttl", type=float, default=3600.0)
         sp.add_argument("--payload", default="")
         sp.add_argument("--hitl", action="store_true")
+        sp.add_argument("--keystore", default=None,
+                        help="directory of persistent Ed25519 keys; "
+                             "omit for ephemeral per-process keys")
         if name == "derive":
             sp.add_argument("--parents", nargs="+", required=True)
 
@@ -70,7 +80,11 @@ def main(argv=None):
     sub_rt = Substrate(store)
 
     if a.cmd in ("issue", "derive"):
-        prod = Producer(a.producer)
+        ks = None
+        if getattr(a, "keystore", None):
+            from .provenance import Keystore
+            ks = Keystore(a.keystore)
+        prod = Producer(a.producer, keystore=ks)
         sub_rt.register(prod)
         parents = []
         if a.cmd == "derive":
