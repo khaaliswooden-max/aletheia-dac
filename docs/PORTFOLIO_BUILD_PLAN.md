@@ -273,15 +273,110 @@ Mistral-7B inference host. The scenario library of §5.
 - TPM 2.0 for measured boot.
 - Anti-tamper enclosure with tamper-evident sealing and chain-of-custody
   logging.
-- **Radiation path decision:** NASA Class B parts (expensive, long-lead) or
-  COTS with documented TMR / watchdog / ECC mitigation. Jetson Orin NX is
-  consumer-grade and will not fly as-is. The roadmap marks this SPECULATIVE and
-  it remains an open architectural decision, not a procurement task.
+- **Radiation path:** resolved — see D5 below.
 - Facility access: proton and heavy-ion beam time, thermal-vacuum cycling, and
   vibration to NASA-STD-7003A. **Beam time is booked months ahead and is the
   schedule driver for v1.0, not the engineering.** [PLAUSIBLE — general
   characteristic of accelerator facility scheduling; specific lead times not
   confirmed with any named facility]
+
+#### D5 — radiation path. RESOLVED: two domains, and HF-10 already requires it.
+
+**The question was a false binary.** "Class B parts *or* mitigated COTS" treats
+the Phronesis Core as one compute domain that must be classified one way. HF-10
+— a **gating** floor, not scoring — already forbids that. Verbatim:
+
+> All decisions in the safety-critical loop ... execute on a formally verified
+> deterministic kernel with worst-case execution time bounded and proven,
+> **independent of any ML inference subsystem**. The kernel runs on
+> **hardware-isolated compute** with bus-level enforcement: the ML subsystem
+> **CANNOT bypass the kernel at the bus level, not by policy**.
+
+Two hardware-isolated compute domains are therefore mandatory regardless of
+radiation [VERIFIED — `vbx_isps_bench_v1_1.json`, HF-10, scope `substrate`,
+gating]. The v1.0 roadmap already anticipates this shape — "a dedicated MCU
+running the kernel + bus, with the AI compute on a separate AP processor
+connected via a controlled message bus." The radiation decision simply follows
+the split that HF-10 compels.
+
+**Decision: classify by domain, not by module.**
+
+| Domain | Contents | Radiation posture |
+|---|---|---|
+| **Safety** | Mercury kernel, MVCI gate, safety bus, watchdog, Aletheia signing | **Rad-hard / NASA Class B.** Small, deterministic, low compute — Class B is both feasible and affordable here. |
+| **Advisory** | Civium 7B inference | **Mitigated COTS.** No alternative exists. |
+
+**Why the advisory domain has no Class B option.** Rad-hard flight processors
+in the RAD750 / RAD5545 / GR740 class deliver on the order of hundreds of MIPS
+to a few GOPS, against a 7B Q4 model needing roughly 4 GB of resident weights
+and tens of GFLOPS for usable latency. Rad-hard memory is not sold in the tens
+of gigabytes. **There is no NASA Class B part that runs Mistral-7B**, so
+"Class B preferred" was never an available option for Civium.
+[PLAUSIBLE — part-class performance from training knowledge, not from verified
+datasheets; this session has no vendor-datasheet access. Check 9 requires
+confirming against manufacturer datasheets before this reaches a partner
+document. The *conclusion* is robust to an order of magnitude either way.]
+
+**Why COTS upsets are architecturally safe.** HF-10 requires the kernel to work
+independent of the ML subsystem, so an advisory-domain SEU that forces a reboot
+degrades the system to deterministic-floors-only — a defined state, not a
+failure. **That state is already under test**: `substrate/requirements-llm.txt`
+records that with the LLM extra absent,
+`test_hard_safety_floor_blocks_llm_on_hypoxia`,
+`test_hard_safety_floor_blocks_llm_on_multi_fault`, and
+`test_physical_validity_blocks_llm` all pass, confirmed by direct run. The
+radiation degradation mode is the LLM-absent mode, and it is verified today.
+
+**The real cost is HF-12, and it is scoring, not gating.** HF-12 requires ≥70%
+autonomous resolution on AUTONOMOUS_ELIGIBLE events. Advisory-domain downtime
+pushes those events to safe-passive fallback, so:
+
+> **A_min = 0.70 / R_up**
+
+where `R_up` is the measured autonomous-resolution ratio with the LLM
+available. At `R_up` = 0.85 the advisory domain may be unavailable ~18% of the
+time; at 0.95, ~26%. Two consequences: the availability requirement is
+**loose**, which further supports COTS; and if `R_up` ≤ 0.70 no availability
+saves it, so `R_up` must be measured before any radiation budget is
+meaningful. [PLAUSIBLE — the relation is derived; the `R_up` values are
+illustrative assumptions, not measurements. Measuring `R_up` is a v0.3
+calibration-audit deliverable and gates this whole calculation.]
+
+**Non-negotiable mitigation: single-event latch-up protection.** SEL is the
+destructive failure mode — one heavy ion can take the part permanently. Current
+limiting with fast detect-and-power-cycle is mandatory on the advisory domain.
+ECC covers single-bit DRAM upsets; multi-bit and SEFI take the reboot path,
+which the architecture already tolerates. For a Mars-class profile behind modest
+shielding, **SEE dominates TID** — unlike LEO/GEO or an outer-planet mission —
+so the design driver is upset and latch-up rate, not dose accumulation.
+[PLAUSIBLE — qualitative environment reasoning; no mission-specific analysis
+run. See the unknowns below.]
+
+**A power finding that falls out of this.** A 200 W-class advisory domain cannot
+run continuously in a PLSS budget: 200 W × 8 h = 1.6 kWh, against an xEMU-class
+suit battery on the order of 0.8–1.2 kWh — the AI domain alone would exceed the
+entire historical suit energy budget. [PLAUSIBLE — Fermi estimate, Check 2;
+battery figures are order-of-magnitude from training knowledge and need
+datasheet confirmation.] **The advisory domain must be event-driven, powered
+only for nuanced-band decisions.** This is fortunate rather than merely
+constraining: a powered-down part accumulates no SEE, so the duty cycle that
+the thermal and energy budget forces is also the cheapest radiation mitigation
+available.
+
+**Named unknowns — none of these are optional, and none are scoped today:**
+
+1. A **mission-specific radiation environment analysis** (OLTARIS / CREME96 /
+   SPENVIS class) producing TID and LET spectra for the actual shielding
+   configuration. Nothing downstream is quantifiable without it.
+2. **Beam-test-measured SEU, SEFI, and SEL cross-sections for the selected
+   part.** Vendor figures are claims to verify, not facts (Check 9).
+3. **`R_up` measured** on the v0.3 calibration audit, which sets `A_min`.
+
+**TRL honesty (Check 5).** This architecture is TRL 2–3 — analysis only,
+however detailed. The v1.0 campaign (proton and heavy-ion beam, thermal
+vacuum, vibration to NASA-STD-7003A) is what moves it to TRL 5–6 in a relevant
+environment. Do not describe it as flight-credible before that campaign
+produces data, in capture documents above all.
 
 **v1.2:** a spacesuit OEM partner (ILC Dover, Collins, Axiom class) owning HF-1
 through HF-7 and HF-11. Pre-contractual.
@@ -719,7 +814,7 @@ required schema property.
 | D2 | ~~Is EPHEMERIS CSAC a separate Pro SKU?~~ **DECIDED 2026-08-23: yes — and the Pro variant is out of v1.0 scope per benchmark §6. No CSAC in the v1.0 BOM** (§6.3) | PI — closed | — |
 | D3 | ~~Revise the display target, or seek a microLED supplier?~~ **DECIDED 2026-08-23: neither — the blueprint had a lux→cd/m² units error. Revise to ~3,000 cd/m² and add a ≤1% reflectance line** (§6.3) | PI — closed | — |
 | D4 | ~~Canonical encoding for the shared core~~ **DECIDED 2026-08-23: deterministic CBOR, RFC 8949 §4.2.1** (§1.2) | PI — closed | — |
-| D5 | PHRONESIS radiation path: Class B or mitigated COTS? (§6.2) | PI | v1.0 architecture |
+| D5 | ~~PHRONESIS radiation path: Class B or mitigated COTS?~~ **DECIDED 2026-08-23: both — rad-hard safety domain, mitigated COTS advisory domain. HF-10 already mandates the split** (§6.2) | PI — closed | — |
 | D6 | ~~Who are the independent attestors?~~ **DECIDED 2026-08-23: protocol settled — author + 2-of-3 independent, three named roles, seven people portfolio-wide. Names remain the PI's to fill** (§7.6) | PI — design closed, recruitment open | benchmark re-commits |
 
 **D4 is closed, including its sub-decision:** deterministic CBOR per RFC 8949
@@ -751,9 +846,16 @@ also imposes a schema requirement on Track A — an entry's signatures must be
 modelled as a set from the start, or adding attestation later forces a v2 format
 (§7.6.9).
 
-D1 is legal and remains open. D5 can wait for Wave 3. Recruitment under D6
-should start immediately: it is the longest-lead item that costs nothing to
-begin.
+**D5 is closed** (§6.2). It resolved the same way D2 and D3 did — by reading a
+frozen assertion rather than revising one. HF-10 is gating and already requires
+the ML subsystem to be hardware-isolated from the kernel, so two radiation
+domains were never optional and the "Class B or COTS" framing was a false
+binary. It leaves three named unknowns (environment analysis, beam-measured
+cross-sections, and a measured `R_up`), none currently scoped.
+
+**D1 is the only decision still open**, and it is legal rather than technical.
+Recruitment under D6 should start immediately: it is the longest-lead item that
+costs nothing to begin.
 
 ---
 
@@ -776,6 +878,10 @@ names what would be needed to upgrade it.
 | Caduceus 20 weeks / 3.25 FTE | target (planning estimate) | actual burn against M0–M8 |
 | Caduceus ~330 tests | target (planning estimate) | the test suite existing |
 | Portfolio 6–8 FTE | target (additive estimate) | bottom-up staffing model |
+| Advisory-domain availability `A_min = 0.70 / R_up` | requirement (derived from HF-12, gating threshold) | measure `R_up` in the v0.3 calibration audit |
+| Rad-hard parts cannot host a 7B model | target (part-class reasoning, no datasheets accessed) | vendor datasheet confirmation |
+| 200 W × 8 h = 1.6 kWh vs ~0.8–1.2 kWh suit battery | target (Fermi estimate, Check 2) | PLSS power budget from the shell partner |
+| PHRONESIS radiation architecture at TRL 2–3 | measured (analysis-only evidence, per Check 5) | v1.0 beam/TVAC/vibration campaign → TRL 5–6 |
 | Orin NX ≤200 W peak | requirement (`CADUCEUS-005 §1.2`) | n/a |
 | Proteus CPU-only mandate | requirement (benchmark §2) | n/a |
 | aletheia-dac 7/7 acceptance tests | measured (independently re-run 2026-08-23, this session) | — |
