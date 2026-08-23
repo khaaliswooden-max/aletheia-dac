@@ -229,6 +229,9 @@ construction needed"]
 `SECURITY.md` names single-attestor commits as the largest known methodology gap
 in the whole ZCS-6 approach. The schema is estimated at 3 days; finding
 independent attestors willing to sign is the actual cost, and it is unstaffed.
+The protocol is now specified in §7.6 — author signature plus 2-of-3
+independent, three roles, seven people portfolio-wide — so this is a bounded
+recruitment task rather than an open design question.
 
 ---
 
@@ -524,7 +527,10 @@ exposure asserted from the nature of the artifacts; no legal review performed]
 Five repositories, ephemeral or filesystem-resident keys, no rotation, no
 revocation path, no HSM, and single-attestor commits. The Track A keystore is
 the floor, the Wave 2 HSM is the target, and multi-party attestation is the gap
-the methodology itself names as its largest.
+the methodology itself names as its largest — now specified in §7.6, where the
+distinction that matters is that **attestor keys are generated and held by the
+attestors**, never issued or escrowed by Visionblox. A signature made with a key
+the attested party controls attests to nothing.
 
 ### 7.4 Staffing
 
@@ -547,6 +553,164 @@ channels that would fund Waves 2 and 3. The framework is complete in
 
 ---
 
+### 7.6 Attestation protocol (D6) — RESOLVED as to design; names remain open
+
+**What this section settles, and what it cannot.** D6 asked "who are the
+independent attestors?" The *who* is the principal investigator's to fill and
+nobody else's — proposing named individuals here would be fabrication, and
+putting real people forward without their consent is not a decision an assistant
+gets to make. What is settled below is everything else: the threat model, the
+scheme, what an attestor actually signs, who is eligible, how failure is
+handled, and what it requires of the wire format. D6 therefore stops being an
+open design question and becomes a bounded recruitment task against a written
+specification — **three people, in three named roles.**
+
+#### 7.6.1 Threat model — be precise about what OTS already covers
+
+`EPHEMERIS-1/SECURITY.md` states the gap as key compromise: *"Chain entries are
+signed by a single key controlled by the maintainer. A compromise of that key
+allows producing fake-but-valid-looking new commits (though not retroactive
+ones, given OTS anchoring)."*
+
+Two distinct threats, and OpenTimestamps handles one of them well:
+
+| Threat | Covered by OTS? | Covered by n-of-m? |
+|---|---|---|
+| Retroactive forgery of an earlier commit | **Yes** — Bitcoin anchoring fixes the hash in time | yes |
+| Forged *new* commit after key theft | no — a stolen key signs a valid-looking entry | **yes** |
+| Benchmark shaped by a privately-held solution | no — OTS timestamps an artifact, it does not witness a process | **partially** |
+
+The third row is the one worth being careful about. OTS proves a benchmark hash
+existed at time T, so a solution *published* later is provably later — ZCS-6's
+ordering claim survives on timestamps alone against that case. What a timestamp
+cannot see is an author privately iterating benchmark and solution together
+before T. Only a human who reviewed the artifact at freeze time and declares no
+knowledge of a candidate solution addresses that residual. **Do not oversell
+this**: attestation reduces that risk, it does not eliminate it.
+
+#### 7.6.2 The scheme
+
+**Author signature required and separate, plus 2-of-3 independent attestors.**
+The author's signature never counts toward the threshold — otherwise "2-of-3"
+degrades to one independent signer.
+
+Escalate to **3-of-5** for any benchmark version that backs a federal
+deliverable or an IP filing. Everything else stays at 2-of-3.
+
+The binding constraint here is recruitment, not cryptography —
+`EPHEMERIS-1/GOVERNANCE.md` already flags that this *"requires identifying
+willing attestors"* and calls the effort substantial. 2-of-3 is the smallest
+scheme that materially beats a single signer and still tolerates one attestor
+being unavailable at commit time. Setting it higher buys marginal assurance and
+guarantees the ceremony never runs.
+
+#### 7.6.3 What an attestor signs
+
+Not "this benchmark is good" — that is an unfalsifiable opinion and a burden no
+volunteer should carry. Four clauses, three of them mechanically checkable:
+
+1. "I received the bundle with manifest SHA-256 `<hash>` on `<date>`."
+2. "I independently recomputed the manifest hash from the bundle contents and it
+   matched." *(the bundles already ship `baselines/verify_bundle.py`; this is a
+   command, not an analysis)*
+3. "I reviewed the assertions and the sealed-pool construction and found no
+   evidence of contamination or of a threshold fitted to a known result."
+4. "I have no knowledge of a candidate solution to this benchmark, and no
+   financial interest in Visionblox LLC or Zuup Innovation Lab."
+
+Clause 4 is what buys the third row of §7.6.1. Clause 3 is the only judgment
+call, and it is scoped narrowly enough to be answerable.
+
+#### 7.6.4 Independence criteria
+
+Ineligible: employees or contractors of Visionblox LLC or Zuup Innovation Lab;
+anyone holding a financial interest; anyone who contributed to the benchmark or
+to a candidate solution; and — flagged deliberately — **the principal
+investigator's academic supervisor or thesis committee**, who have a structural
+interest in the work succeeding. That last exclusion will be inconvenient and it
+is the one most worth keeping.
+
+#### 7.6.5 The three roles to recruit
+
+One person per role gives exactly the 2-of-3 quorum.
+
+| Role | What they check | Domain burden |
+|---|---|---|
+| **Process attestor** | Recomputes hashes, verifies signatures, confirms chain linkage. Clauses 1–2. | lowest — recruit first |
+| **Methodology attestor** | Falsification-first design, Goodhart resistance, sealed-pool fairness. Clause 3. | domain-independent; **one person can serve all five repositories** |
+| **Domain attestor** | Whether the assertions are well-posed in the field. Clause 3. | highest, and **per-repository** |
+
+The domain attestor is the only role that does not generalize: planetary and
+time-scale expertise for EPHEMERIS, conformal prediction or test-time adaptation
+for Proteus, DTN and space communications for Caduceus, safety-critical or
+life-support systems for PHRONESIS. Budget five domain attestors across the
+portfolio, one process attestor, and one methodology attestor — **seven people
+total, not fifteen.**
+
+#### 7.6.6 Recruitment channels
+
+Categories, deliberately not individuals:
+
+- **Authors already cited in the papers.** EPHEMERIS cites 35 references and
+  PHRONESIS 45, many by working researchers in exactly the domains above.
+  Contacting a cited author is ordinary academic courtesy and the warmest
+  channel available. [PLAUSIBLE — a normal practice; no outreach attempted]
+- **The reviewer pool of the target venues** the papers are already aimed at.
+- **The reproducible-builds and OpenTimestamps communities**, which are the
+  natural home for the process-attestor role.
+- **SNHU faculty outside the PI's committee**, subject to §7.6.4.
+- **SOSSEC / NSTXL consortium technical members**, already in the capture
+  posture.
+
+#### 7.6.7 Keys, failure modes, and history
+
+**Keys.** Each attestor generates and holds their own Ed25519 key and publishes
+its fingerprint. Attestor keys must never be issued, escrowed, or rotated by
+Visionblox — an attestation signed with a key the attested party controls
+attests to nothing. Attestor public keys live in a signed roster; roster changes
+are themselves chain entries.
+
+**Failure modes, all specified in advance:**
+
+| Condition | Resolution |
+|---|---|
+| One attestor unavailable | 2-of-3 absorbs it; ceremony proceeds |
+| Attestor key lost | Roster-update entry; prior attestations stand |
+| Attestor withdraws consent | Prior attestations are historical facts and stand; removed from future rosters |
+| **Threshold not reached** | **The commit does not happen.** |
+
+That last row is the one that matters. The failure mode is an uncommitted
+benchmark, never a benchmark committed with one signature and a footnote
+explaining why. A ceremony with a documented bypass is not a ceremony.
+
+**Existing single-signed history is not rewritten.** PHRONESIS LEDGER #0001–
+#0005 and Proteus #0004 stay exactly as they are — chains are append-only and
+that rule outranks the desire for a tidy roster. Attestors may instead sign a
+**new, forward-only corroboration entry**: "I verified the chain from genesis to
+entry #N on date D." That records independent review as a fact about a
+verification performed later, without pretending it happened at the time.
+
+#### 7.6.8 Scope — what needs attestation
+
+**Benchmark freezes and benchmark version re-commits only.** Not routine
+solution commits, not documentation changes, not phase-transition records. The
+ceremony exists to protect the artifacts ZCS-6's credibility rests on, and
+attestor goodwill is a finite resource — spend it where the methodology needs
+it.
+
+#### 7.6.9 Dependency — this changes what Track A must build
+
+**D6 has a hard dependency on D4.** A chain-entry schema that holds one
+signature cannot carry an n-of-m attestation set, and discovering that after the
+v1 format ships forces a v2 for purely structural reasons.
+
+**The shared provenance core must model an entry's signatures as a set from the
+start** — author signature distinguished from attestor signatures, threshold
+policy recorded in the entry, attestor key fingerprints resolvable against a
+roster. Building it now costs very little; retrofitting it costs a format
+version. This is recorded in `docs/PROMPT_shared_provenance_core.md` as a
+required schema property.
+
 ## 8. Decisions required before Wave 2
 
 | # | Decision | Owner | Blocks |
@@ -556,7 +720,7 @@ channels that would fund Waves 2 and 3. The framework is complete in
 | D3 | ~~Revise the display target, or seek a microLED supplier?~~ **DECIDED 2026-08-23: neither — the blueprint had a lux→cd/m² units error. Revise to ~3,000 cd/m² and add a ≤1% reflectance line** (§6.3) | PI — closed | — |
 | D4 | ~~Canonical encoding for the shared core~~ **DECIDED 2026-08-23: deterministic CBOR, RFC 8949 §4.2.1** (§1.2) | PI — closed | — |
 | D5 | PHRONESIS radiation path: Class B or mitigated COTS? (§6.2) | PI | v1.0 architecture |
-| D6 | Who are the independent attestors? (§5) | PI | methodology credibility |
+| D6 | ~~Who are the independent attestors?~~ **DECIDED 2026-08-23: protocol settled — author + 2-of-3 independent, three named roles, seven people portfolio-wide. Names remain the PI's to fill** (§7.6) | PI — design closed, recruitment open | benchmark re-commits |
 
 **D4 is closed, including its sub-decision:** deterministic CBOR per RFC 8949
 §4.2.1, and **no floating-point values in the signed payload**. Confidence and
@@ -581,8 +745,15 @@ variant split and §6 scopes v1.0 to the commercial variant, and A3's "50,000
 lux" is an ambient-illuminance requirement that the blueprint transcribed as
 display emission. No benchmark file is touched by either.
 
-D1 is legal and remains open. D5 can wait for Wave 3. D6 is recruitment and
-should start early because it has a long lead.
+**D6 is closed as to design** (§7.6) and reduced to recruitment: three roles,
+seven people across the portfolio, against a written attestation statement. It
+also imposes a schema requirement on Track A — an entry's signatures must be
+modelled as a set from the start, or adding attestation later forces a v2 format
+(§7.6.9).
+
+D1 is legal and remains open. D5 can wait for Wave 3. Recruitment under D6
+should start immediately: it is the longest-lead item that costs nothing to
+begin.
 
 ---
 

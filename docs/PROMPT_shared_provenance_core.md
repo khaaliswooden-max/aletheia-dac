@@ -129,16 +129,31 @@ for a decision — do not paper over it.
    preserve each repository's current public API. Do not change any repository's
    external call signatures in this pass.
 
-3. **A conformance test-vector suite** — signed fixtures, committed, that any
+3. **An n-of-m-ready signature model in the chain entry.** An entry's
+   signatures must be a **set**, not a single field: the author signature
+   distinguished from attestor signatures, the threshold policy in force
+   recorded in the entry, and attestor key fingerprints resolvable against a
+   signed roster. Roster changes are themselves chain entries.
+
+   The portfolio has decided on multi-party attestation for benchmark commits
+   (author signature plus 2-of-3 independent attestors; see
+   `docs/PORTFOLIO_BUILD_PLAN.md` §7.6). Recruitment is still in progress, so
+   **no attestation will be produced during this session** — but a v1 entry
+   format that holds exactly one signature would force a v2 for purely
+   structural reasons the moment the first attestor signs. Model the set now;
+   leaving it with a single author signature and zero attestors is a valid
+   instance of it.
+
+4. **A conformance test-vector suite** — signed fixtures, committed, that any
    implementation in any language must reproduce byte-for-byte. Include
    deliberately adversarial vectors: field reordering, unknown fields, empty
    parent sets, maximum-length fields, non-ASCII, and near-miss signatures.
    These vectors are what Rust and embedded C will be validated against later.
 
-4. **One verifier** that validates a chain from any of the five substrates and
+5. **One verifier** that validates a chain from any of the five substrates and
    reports which format version each entry uses.
 
-5. **A persistent Ed25519 keystore**, replacing aletheia-dac's per-process
+6. **A persistent Ed25519 keystore**, replacing aletheia-dac's per-process
    ephemeral keys. This is already item 1 of the aletheia-dac Phase 1 roadmap
    and is the reason the repo cannot currently back the other four.
 
@@ -202,6 +217,8 @@ both validated against your vectors. Do not start them.
    back-edge candidate with delta justification, per ZCS-6.
 6. `docs/WIRE_FORMAT.md` is complete enough that an engineer could implement it
    in Rust without reading the Python.
+7. A chain entry carries its signatures as a set, and a vector exists for the
+   author-only case (zero attestors) and for an author-plus-two-attestor case.
 
 ## First response
 
