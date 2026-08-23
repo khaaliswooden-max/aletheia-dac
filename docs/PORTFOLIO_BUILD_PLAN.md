@@ -295,49 +295,123 @@ The blueprint carries a genuine bill of materials. All values are `target`
 | Item | Spec | Label |
 |---|---|---|
 | Crystal | Sapphire, AR-coated, 1.2 mm | target |
-| Display | 1.4″ AMOLED, 466×466, 50,000 cd/m² peak | target |
+| Display | 1.4″ AMOLED, 466×466, **~3,000 cd/m² peak** (revised, D3) | target |
+| Display stack | Total reflectance ≤1% — AR + circular polarizer (added, D3) | target |
 | Ambient sensor | Lux + IR cut, 1 lx – 100 klx | target |
-| Mainboard | 4-layer FR4: MCU + SE + Flash + 9-DOF IMU + CSAC + GNSS | target |
+| Mainboard | 4-layer FR4: MCU + SE + Flash + 9-DOF IMU + GNSS (**no CSAC**, D2) | target |
 | Antenna | Ceramic patch, L1/L5 | target |
 | Battery | Li-ion 500 mAh, custom L-shape | target |
 | Caseback | Grade-5 titanium, IP68 / 100 m | target |
 | Envelope | 44.0 × 13.5 × 52.0 mm, 78 g, −20…+60 °C, MIL-STD-810H | target |
 
-#### Conflict 1 — A5 and A6 are mutually exclusive at 500 mAh
+#### D2 — CSAC and the A5/A6 relationship. RESOLVED: commercial variant only.
 
-[VERIFIED as arithmetic; PLAUSIBLE as a system conclusion — see the caveat]
+**Correction to an earlier reading in this document.** A prior revision framed
+A5 and A6 as mutually exclusive and raised the possibility of a v1.3 benchmark
+back-edge. That was wrong, and reading the frozen assertion text resolves it.
+No back-edge is warranted and none should be prepared.
 
-- A5 is a scoring assertion: ≥14 days on 500 mAh. `requirement`.
-- 500 mAh × 3.7 V = 1.85 Wh = 6660 J. `target` (derived from the BOM target).
-- 14 days = 1.209 × 10⁶ s.
-- Therefore the **whole-system average power budget is ≈5.5 mW** — display,
-  MCU, IMU at 50 Hz, GNSS, and CSAC combined.
-- A chip-scale atomic clock in the Microchip SA.45s class draws on the order of
-  120 mW continuous — roughly **22× the entire system budget**. `target`
-  (vendor datasheet class figure, not measured here, no EvidenceRecord).
+The frozen spec already anticipates two variants. A6, verbatim:
 
-The blueprint annotates CSAC as "(Pro)", which reads as a distinct SKU. **If it
-is a separate SKU, say so explicitly in the spec: the Pro SKU cannot claim A5 at
-500 mAh.** If it is not, this is a genuine falsification and the correct ZCS-6
-response is a v1.3 benchmark back-edge, not a firmware patch. Options: duty-
-cycle the CSAC with documented holdover degradation; grow the cell; or split the
-assertion by SKU.
+> Without GNSS, using IMU + last-known-state propagation, position drift ≤ **10
+> m** over 24 hours of stationary operation. SPECULATIVE pending hardware
+> simulation; **commercial variant may relax to ≤ 100 m, Pro variant with
+> chip-scale atomic clock (CSAC) holds 10 m.**
 
-**This decision is required before any EPHEMERIS hardware spend.**
+And §6 Out of Scope (v1.0), verbatim: *"ITAR/EAR posture. **Commercial variant
+only at v1.0.**"*
 
-#### Conflict 2 — 50,000 cd/m² has no wearable supplier
+So the blueprint's "(Pro)" annotation is **consistent with the benchmark, not in
+conflict with it** [VERIFIED — direct comparison of blueprint and
+`BENCHMARK_v1.0.md` §A6, §6], and the CSAC-bearing variant is already outside
+v1.0 scope by the benchmark's own words.
 
-[PLAUSIBLE — no supplier survey has been run; stated as a procurement risk, not
-a measured finding]
+**Decision: the v1.0 BOM carries no CSAC.** Build the commercial variant. It
+targets A5 (≥14 days) and A6 at ≤100 m, and those two do not conflict. The
+arithmetic below stands but describes a device the benchmark never asks anyone
+to build:
 
-Shipping wearable AMOLED panels peak roughly one order of magnitude below this
-figure. At 1.4″ the spec implies a microLED path with no identified volume
-supplier.
+- A5: ≥14 days on 500 mAh nominal. `requirement` (scoring assertion, and
+  self-labeled in the spec as "a market-positioning threshold (Garmin Fenix
+  class), not a derived capability threshold").
+- 500 mAh × 3.7 V = 1.85 Wh = 6660 J over 1.209 × 10⁶ s → **≈5.5 mW
+  whole-system average**. `target` (derived from a BOM target).
+- A CSAC in the Microchip SA.45s class draws on the order of 120 mW continuous,
+  roughly 22× that budget. `target` (vendor datasheet class, no EvidenceRecord).
 
-The good news is structural: **A3 audits contrast, font size, and luminance
-sweep — not an absolute nit figure.** The display spec is therefore a hardware
-choice that can be revised without touching the frozen benchmark. Revise it
-deliberately, record the revision, and do not let it drift silently.
+Three consequences follow, and all three are wins:
+
+1. **No benchmark pressure.** Nothing is falsified, nothing is softened.
+2. **Export exposure leaves the near-term build.** A CSAC is the part most
+   likely to carry ITAR/EAR exposure, and §6 already scopes v1.0 to the
+   commercial variant. This narrows §7.2 for EPHEMERIS specifically.
+3. **The most expensive line leaves the BOM.** [PLAUSIBLE — no quote obtained;
+   asserted from the part class, not from a supplier]
+
+**Residual question, deferred with the Pro variant and not on the critical
+path.** A6 specifies *stationary* operation. For a device that is stationary and
+can detect that it is stationary, position is held by not moving, not by
+inertial propagation — so the mechanism by which a CSAC improves the bound from
+100 m to 10 m is not stated in the spec, and A6 marks itself SPECULATIVE
+pending hardware simulation. **Write that mechanism down before any Pro-variant
+spend.** If it turns out a CSAC does not deliver 10 m for a stationary device,
+that is an A6 design question for a future benchmark cycle, and it should be
+surfaced as a back-edge candidate rather than absorbed silently.
+
+#### D3 — display luminance. RESOLVED: the blueprint has a units error.
+
+**The blueprint transcribed an ambient-illuminance requirement into a display-
+emission spec.** [VERIFIED — direct comparison of the two texts]
+
+A3's audit protocol, verbatim: *"Label visible at **50,000 lux** simulated
+sunlight (rendered luminance test)."* The blueprint's specification panel reads
+**"50,000 cd/m² peak"**. Lux is incident illuminance; cd/m² is emitted
+luminance. They are different quantities, and the benchmark asks for the first.
+
+Nothing needs 50,000 cd/m² of emission. What A3 requires is a **WCAG AA
+contrast ratio ≥ 4.5:1 sustained across a 1000-frame sweep at 50,000 lux
+ambient** — and it is audited on rendered frames, so it does not gate the
+panel's absolute peak luminance at all. The panel spec is a product decision,
+not a benchmark-gated one.
+
+**What actually sets legibility is stack reflectance, not peak emission.**
+Modelling reflected ambient as Lambertian veiling glare, `L_veil ≈ ρ·E/π` at
+E = 50,000 lux:
+
+| Stack reflectance ρ | Veiling glare | Peak luminance needed for 4.5:1 |
+|---|---|---|
+| 4% (bare sapphire, no AR) | ≈ 637 cd/m² | ≈ 2,700 cd/m² |
+| 2% (basic AR) | ≈ 318 cd/m² | ≈ 1,350 cd/m² |
+| 0.5% (AR + circular polarizer) | ≈ 80 cd/m² | ≈ 340 cd/m² |
+
+[PLAUSIBLE — first-principles derivation, not measured. Assumes Lambertian
+reflection, AMOLED true black, and reuse of the WCAG contrast form with its
+0.05 flare term standing in for the ambient floor. A rendered A3 audit or a
+physical sunlight measurement would upgrade it.]
+
+**Decision:** revise the BOM to a **procurable ~3,000 cd/m² peak-class panel**,
+which clears the requirement with wide margin even against bare sapphire, and
+**promote total stack reflectance to a first-class BOM line with a ≤1% target**
+(AR coating plus circular polarizer). Reflectance is roughly an 8× lever on
+required emission across the table above; peak nits alone is the expensive way
+to buy the same legibility.
+
+Two further benefits: a 3,000-nit-class panel is available from multiple
+wearable suppliers rather than requiring an unidentified microLED source, and
+it draws materially less than a hypothetical 50,000-nit panel, which relieves
+the A5 budget that §D2 leaves tight.
+
+**No benchmark change. This is a blueprint correction**, and it should be
+recorded as one — the drawing is marked SKETCH ONLY and revising it is not a
+back-edge.
+
+#### Residual A5 risk, unresolved by either decision
+
+Even without a CSAC, ≈5.5 mW whole-system average for a 466×466 AMOLED at ≥1 Hz
+refresh with a 50 Hz IMU is aggressive. A5 is scoring, not gating, and the spec
+labels it a market-positioning threshold, so this is a stretch target honestly
+declared rather than a defect. It should be tracked as a measured number at DVT,
+not asserted before then.
 
 #### Software
 
@@ -355,7 +429,8 @@ against the Track A vectors.
   themselves an engineering deliverable, and the reduction could violate A1a or
   A1b. Nothing in the roadmap scopes it.
 - EMC/FCC/CE certification; UN 38.3 Li-ion transport testing.
-- CSAC export-control screening (see §7.2).
+- ~~CSAC export-control screening~~ — removed from v1.0 scope by D2; returns
+  with the Pro variant.
 
 ### 6.4 Proteus — cheapest start, real compute bill
 
@@ -477,8 +552,8 @@ channels that would fund Waves 2 and 3. The framework is complete in
 | # | Decision | Owner | Blocks |
 |---|---|---|---|
 | D1 | Does Caduceus M0 block M1? (§7.1) | PI + practitioner | all Caduceus build |
-| D2 | Is EPHEMERIS CSAC a separate Pro SKU? (§6.3) | PI | all EPHEMERIS hardware spend |
-| D3 | Revise the display target, or seek a microLED supplier? (§6.3) | PI | EPHEMERIS BOM |
+| D2 | ~~Is EPHEMERIS CSAC a separate Pro SKU?~~ **DECIDED 2026-08-23: yes — and the Pro variant is out of v1.0 scope per benchmark §6. No CSAC in the v1.0 BOM** (§6.3) | PI — closed | — |
+| D3 | ~~Revise the display target, or seek a microLED supplier?~~ **DECIDED 2026-08-23: neither — the blueprint had a lux→cd/m² units error. Revise to ~3,000 cd/m² and add a ≤1% reflectance line** (§6.3) | PI — closed | — |
 | D4 | ~~Canonical encoding for the shared core~~ **DECIDED 2026-08-23: deterministic CBOR, RFC 8949 §4.2.1** (§1.2) | PI — closed | — |
 | D5 | PHRONESIS radiation path: Class B or mitigated COTS? (§6.2) | PI | v1.0 architecture |
 | D6 | Who are the independent attestors? (§5) | PI | methodology credibility |
@@ -500,8 +575,14 @@ its internal J2000/TT representation at the envelope boundary, a conversion that
 crosses the leap-second table and is therefore a `DC-6`-class hazard by
 construction (§6.3); the work order flags it at the point of definition.
 
-D2 remains on the critical path and is cheap to decide. D1 is legal. D5 can
-wait for Wave 3.
+**D2 and D3 are closed** (§6.3). Both resolved by reading the frozen assertion
+text rather than by revising it: A6 already authorizes the commercial/Pro
+variant split and §6 scopes v1.0 to the commercial variant, and A3's "50,000
+lux" is an ambient-illuminance requirement that the blueprint transcribed as
+display emission. No benchmark file is touched by either.
+
+D1 is legal and remains open. D5 can wait for Wave 3. D6 is recruitment and
+should start early because it has a long lead.
 
 ---
 
@@ -516,8 +597,10 @@ names what would be needed to upgrade it.
 | 4 chain implementations, 377/258/206/72 lines | measured (line count, direct inspection 2026-08-23) | already a direct observation; record not required |
 | EPHEMERIS A5 ≥14 days on 500 mAh | requirement (benchmark assertion) | n/a — it is a contract |
 | 500 mAh → 1.85 Wh → 5.5 mW average budget | target (derived from a BOM target) | measured cell capacity + a real duty-cycle model |
-| CSAC ≈120 mW continuous | target (vendor datasheet class) | bench measurement of the selected part |
-| Display 50,000 cd/m² peak | target (sketch-only blueprint) | supplier quote or measured panel |
+| CSAC ≈120 mW continuous | target (vendor datasheet class) | moot for v1.0 — CSAC removed by D2 |
+| ~~Display 50,000 cd/m² peak~~ | **withdrawn — units error (lux vs cd/m²), D3** | — |
+| Display ~3,000 cd/m² peak, stack reflectance ≤1% | target (revised BOM) | supplier quote or measured panel |
+| Peak luminance needed for A3 4.5:1 at 50 klx (2,700 / 1,350 / 340 cd/m² by reflectance) | target (first-principles derivation) | rendered A3 audit or physical sunlight measurement |
 | All other BOM values in §6.3 | target | DVT build + measurement |
 | Caduceus 20 weeks / 3.25 FTE | target (planning estimate) | actual burn against M0–M8 |
 | Caduceus ~330 tests | target (planning estimate) | the test suite existing |
