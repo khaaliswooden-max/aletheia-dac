@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from aletheia.provenance import cbor, codec, quantize, vectors
+from aletheia.provenance import attest, cbor, codec, quantize, vectors
 from aletheia.provenance.entry import EntryV1
 from aletheia.provenance.envelope import DacV1, SchemaError, from_projection
 
@@ -95,7 +95,7 @@ def test_quantize_reject_vector(v):
 def test_dac_vector(v):
     env = from_projection(v["projection"])
     assert env.signing_bytes().hex() == v["signing_bytes_hex"]
-    assert env.signature.hex() == v["signature_hex"]
+    assert env.signatures.encode().hex() == v["signature_set_hex"]
     assert env.record_hash().hex() == v["record_hash_hex"]
     assert env.encode().hex() == v["wire_hex"]
     assert env.verify(), "vector signature must verify against the embedded key"
@@ -108,11 +108,16 @@ def test_entry_vector(v):
     entry = EntryV1(seq=v["seq"], ts_us=v["ts_us"], event_type=v["event_type"],
                     payload=bytes.fromhex(v["payload_hex"]),
                     prev=bytes.fromhex(v["prev_hex"]), ext=v["ext"])
-    entry.signature = bytes.fromhex(v["signature_hex"])
+    entry.signatures = attest.SignatureSet.from_map(
+        cbor.decode(bytes.fromhex(v["signature_set_hex"])))
     assert entry.signing_bytes().hex() == v["signing_bytes_hex"]
     assert entry.record_hash().hex() == v["record_hash_hex"]
     assert entry.encode().hex() == v["wire_hex"]
     assert entry.verify(vectors.conformance_private_key().public_key())
+    report = entry.verify_signatures()
+    assert report["ok"], report["problems"]
+    assert len(report["attestors_valid"]) == v["attestor_count"]
+    assert report["threshold_required"] == v["threshold_required"]
 
 
 # --- near-miss signatures -------------------------------------------------- #
@@ -128,6 +133,92 @@ def test_near_miss_vector(v):
     msg = bytes.fromhex(target["signing_bytes_hex"])
     assert not codec.verify_raw_ok(pk, msg, bytes.fromhex(v["signature_hex"])), \
         f"near-miss {v['name']} must not verify: {v['reason']}"
+
+
+# --- n-of-m attestation ---------------------------------------------------- #
+def test_the_two_required_attestation_cases_exist():
+    """Work order deliverable 3 / DoD item 7: a vector for the author-only case
+    (zero attestors) and for an author-plus-two-attestor case."""
+    names = {v["name"] for v in SUITE["entry"]}
+    assert "entry-attest-author-only" in names
+    assert "entry-attest-author-plus-two" in names
+
+
+def test_attestor_keys_are_labelled_as_test_keys():
+    tk = SUITE["test_attestor_keys"]
+    assert "TEST KEYS" in tk["WARNING"]
+    assert "no real attestation exists" in tk["WARNING"]
+
+
+@pytest.mark.parametrize("v", SUITE["attest_reject"], ids=_ids("attest_reject"))
+def test_attest_reject_vector(v):
+    """Each vector is either structurally rejected, or verifies but reports the
+    threshold as not met. Neither may quietly pass."""
+    raw = bytes.fromhex(v["signature_set_hex"])
+    try:
+        sigset = attest.SignatureSet.from_map(cbor.decode(raw))
+    except (attest.AttestationError, cbor.CBORError):
+        return                      # structurally rejected: correct
+    msg = bytes.fromhex(v["signing_bytes_hex"]) if "signing_bytes_hex" in v else b""
+    report = sigset.verify(msg)
+    assert not report["ok"], f"{v['name']} must not pass: {v['reason']}"
+
+
+def test_author_signature_never_counts_toward_the_threshold():
+    """Section 7.6.2 — otherwise 2-of-3 degrades to one independent signer."""
+    entry = EntryV1.from_json_payload(seq=0, ts_us=1, event_type="X",
+                                      payload_obj={"a": 1})
+    sk = vectors.conformance_private_key()
+    entry.sign(sk, policy=attest.POLICY_2_OF_3)
+    report = entry.verify_signatures()
+    assert report["author_signature"] == "VALID"
+    assert report["threshold_required"] == 2
+    assert not report["threshold_met"]
+    assert "threshold_not_reached" in report["problems"]
+    assert not report["ok"]
+
+
+def test_attestation_is_bound_into_the_record_hash():
+    """Stripping an attestor must break the chain, not silently downgrade it."""
+    sk = vectors.conformance_private_key()
+    entry = EntryV1.from_json_payload(seq=0, ts_us=1, event_type="X",
+                                      payload_obj={"a": 1})
+    entry.sign(sk, policy=attest.POLICY_2_OF_3)
+    author_only_hash = entry.record_hash()
+    entry.attest_with(vectors._test_attestor(1))
+    assert entry.record_hash() != author_only_hash
+
+
+def test_roster_resolves_attestor_fingerprints():
+    sk = vectors.conformance_private_key()
+    a1 = vectors._test_attestor(1)
+    entry = EntryV1.from_json_payload(seq=0, ts_us=1, event_type="X",
+                                      payload_obj={"a": 1})
+    entry.sign(sk, policy=attest.ThresholdPolicy(required=1, roster_size=1))
+    entry.attest_with(a1, role=attest.ROLE_PROCESS)
+
+    empty = attest.Roster(entries=[])
+    assert "attestor_not_in_roster" in entry.verify_signatures(empty)["problems"]
+
+    known = attest.Roster(entries=[{
+        "id": "attestor-1",
+        "k": codec.public_key_bytes(a1.public_key()),
+        "roles": [attest.ROLE_PROCESS]}])
+    assert entry.verify_signatures(known)["ok"]
+
+
+def test_roster_changes_are_chain_entries():
+    """Section 7.6.7 — a roster change is recorded on the chain like anything else."""
+    a1 = vectors._test_attestor(1)
+    roster = attest.Roster(entries=[{
+        "id": "attestor-1",
+        "k": codec.public_key_bytes(a1.public_key()),
+        "roles": [attest.ROLE_PROCESS]}])
+    entry = EntryV1(seq=0, ts_us=1, event_type=attest.ROSTER_EVENT_TYPE,
+                    payload=attest.roster_event_payload(roster))
+    entry.sign(vectors.conformance_private_key())
+    assert entry.verify_signatures()["ok"]
+    assert entry.payload == roster.encode()
 
 
 # --- schema rejection ------------------------------------------------------ #
@@ -187,10 +278,10 @@ def test_vendored_copies_match_this_canonical_core():
     import hashlib
     import os
 
-    names = sorted(["__init__.py", "cbor.py", "codec.py", "entry.py",
-                    "envelope.py", "keystore.py", "legacy.py", "quantize.py",
-                    "vectors.py", "verifier.py", "verify.py"])
     canonical = Path(vectors.__file__).resolve().parent
+    # Discovered, not hardcoded: a fixed list goes stale the moment a module is
+    # added, which is how attest.py briefly escaped this check.
+    names = sorted(p.name for p in canonical.glob("*.py"))
     root = Path(os.environ.get("ZIL_PORTFOLIO_ROOT")
                 or Path(__file__).resolve().parents[2])
     copies = {

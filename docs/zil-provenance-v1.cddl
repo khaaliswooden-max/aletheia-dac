@@ -15,15 +15,75 @@ start = dac-wire / entry-wire
 ; Wire forms: the signed structure plus its detached signature.
 ; ---------------------------------------------------------------------------
 
-; Encoded key order for both wire maps: e, s
+; Encoded key order for both wire maps: e, sig
 dac-wire = {
-  "s" : ed25519-signature,   ; over DOMAIN_DAC || cbor(dac-v1)
-  "e" : dac-v1,
+  "e"   : dac-v1,
+  "sig" : signature-set,     ; over DOMAIN_DAC || cbor(dac-v1)
 }
 
 entry-wire = {
-  "s" : ed25519-signature,   ; over DOMAIN_CHAIN || cbor(entry-v1)
-  "e" : entry-v1,
+  "e"   : entry-v1,
+  "sig" : signature-set,     ; over DOMAIN_CHAIN || cbor(entry-v1)
+}
+
+; ---------------------------------------------------------------------------
+; Signature set — n-of-m attestation, modelled from the start.
+;
+; The portfolio has decided on author + 2-of-3 independent attestation for
+; benchmark commits (PORTFOLIO_BUILD_PLAN.md 7.6). A schema holding exactly one
+; signature cannot carry that, and retrofitting it costs a format version.
+; An author signature with zero attestors is a valid instance of this model and
+; is what every substrate emits today.
+;
+; Encoded key order: a, at, th
+; ---------------------------------------------------------------------------
+
+signature-set = {
+  "a"    : attestation,      ; the author. NEVER counts toward the threshold.
+  ? "at" : [+ attestation],  ; independent attestors; omit when empty
+  ? "th" : threshold-policy, ; the policy in force when this entry was sealed
+}
+
+; Attestor entries MUST be sorted by "k" in bytewise ascending order, MUST NOT
+; repeat a key, and MUST NOT contain the author's key. Independence beyond that
+; is a recruitment property (7.6.4) that no encoding can check.
+;
+; Encoded key order: k, r, s
+attestation = {
+  "k"   : ed25519-pubkey,    ; resolvable against the signed roster
+  "s"   : ed25519-signature, ; over the SAME bytes the author signed
+  ? "r" : role,
+}
+
+role = "process" / "methodology" / "domain"
+
+; Recorded IN the entry, not looked up at verification time: a policy that could
+; be edited afterwards would let a 2-of-3 entry be reinterpreted as author-only.
+; "n" counts INDEPENDENT attestors and never includes the author.
+; n <= m is REQUIRED.
+;
+; Encoded key order: m, n, roster
+threshold-policy = {
+  "n"        : uint,         ; independent attestors required (2, or 3 for
+                             ; federal/IP-backing versions)
+  "m"        : uint,         ; roster size the threshold is drawn from
+  ? "roster" : sha256,       ; hash of the signed roster in force
+}
+
+; A roster is a signed list of attestor keys. Roster changes are themselves
+; chain entries: an entry whose "et" is "ROSTER_UPDATE" and whose "ep" is
+; cbor(roster).
+;
+; Encoded key order: e, v  ·  roster-entry: k, id, roles
+roster = {
+  "v" : 1,
+  "e" : [* roster-entry],    ; sorted by "k", bytewise
+}
+
+roster-entry = {
+  "id"    : tstr,
+  "k"     : ed25519-pubkey,
+  "roles" : [* role],        ; sorted
 }
 
 ed25519-signature = bstr .size 64

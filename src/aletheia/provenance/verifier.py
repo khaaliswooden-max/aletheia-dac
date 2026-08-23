@@ -22,7 +22,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from . import codec, legacy
+from . import attest, cbor, codec, legacy
 from .envelope import DacV1, from_projection
 from .entry import EntryV1
 
@@ -142,10 +142,14 @@ def verify_v1_dac_store(db_path: str, keystore=None) -> dict:
         computed = env.record_hash()
         if computed.hex() != rec_hex:
             defects.append({"index": i, "defect": "record_hash_mismatch"})
-        sig_ok = env.verify()
-        item["signature"] = "VALID" if sig_ok else "INVALID"
-        if not sig_ok:
+        report = env.verify_signatures()
+        item["signature"] = report["author_signature"]
+        item["attestors"] = len(report["attestors_valid"])
+        if report["author_signature"] != "VALID":
             defects.append({"index": i, "defect": "signature_invalid"})
+        for problem in report["problems"]:
+            if problem != "author_signature_invalid":
+                defects.append({"index": i, "defect": problem})
         if keystore is not None:
             trusted = keystore.is_trusted(env.producer_id, env.producer_pk)
             item["trust"] = "TRUSTED" if trusted else "UNTRUSTED_KEY"
@@ -181,19 +185,35 @@ def verify_v1_chain(db_path: str, public_key=None) -> dict:
                         payload=ep_json.encode("utf-8") if isinstance(ep_json, str)
                         else bytes(ep_json),
                         prev=bytes.fromhex(prev_hex), ext={"ts_ns": ts_ns})
-        entry.signature = bytes.fromhex(sig_hex)
+        try:
+            entry.signatures = attest.SignatureSet.from_map(
+                cbor.decode(bytes.fromhex(sig_hex)))
+        except Exception as exc:
+            defects.append({"index": idx, "seq": seq,
+                            "defect": f"invalid_signature_set:{type(exc).__name__}"})
+            entries.append({**item, "ok": False})
+            expected_prev = bytes.fromhex(eh_hex)
+            expected_seq = seq + 1
+            continue
         if entry.prev != expected_prev:
             defects.append({"index": idx, "seq": seq, "defect": "prev_hash_mismatch"})
         computed = entry.record_hash()
         if computed.hex() != eh_hex:
             defects.append({"index": idx, "seq": seq, "defect": "entry_hash_mismatch"})
-        if public_key is not None:
-            ok = entry.verify(public_key)
-            item["signature"] = "VALID" if ok else "INVALID"
-            if not ok:
-                defects.append({"index": idx, "seq": seq, "defect": "signature_invalid"})
-        else:
-            item["signature"] = "UNCHECKED_NO_KEY"
+        report = entry.verify_signatures()
+        item["signature"] = report["author_signature"]
+        item["attestors"] = len(report["attestors_valid"])
+        item["threshold_required"] = report["threshold_required"]
+        if report["author_signature"] != "VALID":
+            defects.append({"index": idx, "seq": seq, "defect": "signature_invalid"})
+        for problem in report["problems"]:
+            if problem != "author_signature_invalid":
+                defects.append({"index": idx, "seq": seq, "defect": problem})
+        if public_key is not None and not entry.verify(public_key):
+            # The set verifies against the key it carries; this checks the
+            # author signature against the key the CALLER expects.
+            defects.append({"index": idx, "seq": seq,
+                            "defect": "author_key_mismatch"})
         item["ok"] = not any(x["index"] == idx for x in defects)
         entries.append(item)
         expected_prev, expected_seq = computed, seq + 1

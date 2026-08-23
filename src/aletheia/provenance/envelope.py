@@ -26,7 +26,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
-from . import cbor, codec, quantize
+from . import attest, cbor, codec, quantize
 
 FORMAT_VERSION = 1
 
@@ -181,7 +181,10 @@ class DacV1:
     prev: bytes = codec.GENESIS_PREV
     claim_id: bytes = field(default_factory=lambda: uuid.uuid4().bytes)
     ext: Optional[dict] = None
-    signature: bytes = b""
+    #: An author signature plus zero or more attestor signatures. Modelled as a
+    #: set from the start so multi-party attestation never forces a v2 format
+    #: (PORTFOLIO_BUILD_PLAN.md 7.6.9).
+    signatures: Optional[attest.SignatureSet] = None
 
     # ---- schema ---------------------------------------------------------- #
     def to_map(self) -> dict:
@@ -268,39 +271,69 @@ class DacV1:
     def signing_bytes(self) -> bytes:
         return codec.signing_bytes(codec.DOMAIN_DAC, self.to_map())
 
+    @property
+    def signature(self) -> bytes:
+        """The author signature alone, for callers that only need that."""
+        return b"" if self.signatures is None else bytes(self.signatures.author.signature)
+
+    @signature.setter
+    def signature(self, sig: bytes) -> None:
+        """Set an author-only signature set from a bare signature.
+
+        Kept so a caller holding a raw signature and the producer key can seal
+        an envelope without constructing the set by hand.
+        """
+        self.signatures = attest.SignatureSet(
+            author=attest.Attestation(public_key=bytes(self.producer_pk),
+                                      signature=bytes(sig)))
+
     def encode(self) -> bytes:
-        """Full on-the-wire form: the signed structure plus its signature."""
-        return cbor.encode({"s": bytes(self.signature), "e": self.to_map()})
+        """Full on-the-wire form: the signed structure plus its signature set."""
+        _require(self.signatures is not None, "envelope is not signed")
+        return cbor.encode({"e": self.to_map(), "sig": self.signatures.to_map()})
 
     @classmethod
     def decode(cls, data: bytes) -> "DacV1":
         outer = cbor.decode(data)
         _require(isinstance(outer, dict), "wire form must be a map")
-        _reject_unknown(outer, {"s", "e"}, "wire form")
-        _require("s" in outer and "e" in outer, "wire form requires 's' and 'e'")
-        _require(isinstance(outer["s"], bytes) and len(outer["s"]) == codec.SIGNATURE_LEN,
-                 f"signature must be {codec.SIGNATURE_LEN} bytes")
+        _reject_unknown(outer, {"sig", "e"}, "wire form")
+        _require("sig" in outer and "e" in outer, "wire form requires 'e' and 'sig'")
         env = cls.from_map(outer["e"])
-        env.signature = outer["s"]
+        env.signatures = attest.SignatureSet.from_map(outer["sig"])
         return env
 
-    def sign(self, private_key) -> "DacV1":
-        self.signature = codec.sign(private_key, codec.DOMAIN_DAC, self.to_map())
+    def sign(self, private_key, policy=None) -> "DacV1":
+        """Seal with an author signature and no attestors.
+
+        A valid instance of the n-of-m model, not a special case outside it.
+        """
+        self.signatures = attest.author_only(
+            private_key, codec.DOMAIN_DAC, self.to_map(), policy)
         return self
 
     def verify(self, public_key=None) -> bool:
-        """Verify the envelope's own signature.
+        """Verify the envelope's author signature.
 
         With no argument, verifies against the public key the envelope carries —
         which establishes internal consistency, not authority. Authority comes
         from checking ``producer_pk`` against a trust root; the verifier does
-        that separately.
+        that separately. For the full n-of-m report use ``verify_signatures``.
         """
+        if self.signatures is None:
+            return False
         pk = public_key if public_key is not None else codec.public_key_from_bytes(self.producer_pk)
         return codec.verify(pk, codec.DOMAIN_DAC, self.to_map(), self.signature)
 
+    def verify_signatures(self, roster=None) -> dict:
+        """Full report: author signature, attestor signatures, threshold."""
+        if self.signatures is None:
+            return {"ok": False, "problems": ["unsigned"]}
+        return self.signatures.verify(self.signing_bytes(), roster)
+
     def record_hash(self) -> bytes:
-        return codec.record_hash(codec.DOMAIN_DAC, self.to_map(), self.signature)
+        _require(self.signatures is not None, "envelope is not signed")
+        return codec.record_hash(codec.DOMAIN_DAC, self.to_map(),
+                                 self.signatures.encode())
 
 
 # --------------------------------------------------------------------------- #
@@ -379,7 +412,7 @@ def to_projection(env: "DacV1") -> dict:
         "cls": m["cls"],
         "hitl": m["hitl"],
         "prev": m["prev"].hex(),
-        "sig": bytes(env.signature).hex(),
+        "sig": env.signatures.encode().hex() if env.signatures else "",
     }
     if "ext" in m:
         proj["ext"] = m["ext"]
@@ -421,5 +454,7 @@ def from_projection(proj: dict) -> "DacV1":
                     raise SchemaError(f"{section}.{k} is not an integer: {val!r}")
                 m[section][k] = int(val)
     env = DacV1.from_map(m)
-    env.signature = bytes.fromhex(proj.get("sig", ""))
+    raw = proj.get("sig", "")
+    if raw:
+        env.signatures = attest.SignatureSet.from_map(cbor.decode(bytes.fromhex(raw)))
     return env

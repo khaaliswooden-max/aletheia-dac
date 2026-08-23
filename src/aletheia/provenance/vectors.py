@@ -27,7 +27,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from . import cbor, codec, quantize
+from . import attest, cbor, codec, quantize
 from .entry import EntryV1
 from .envelope import ConfidenceV1, DacV1, SchemaError, ValidityV1
 
@@ -46,6 +46,22 @@ def conformance_private_key():
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
     seed = hashlib.sha256(TEST_KEY_DERIVATION).digest()
+    return Ed25519PrivateKey.from_private_bytes(seed)
+
+
+TEST_ATTESTOR_DERIVATION = b"zil-provenance/v1/conformance-test-attestor/DO-NOT-USE-IN-PRODUCTION/"
+
+
+def _test_attestor(n: int):
+    """A conformance TEST attestor key. Not a real attestor, not a real key.
+
+    Recruitment of independent attestors is open and is the principal
+    investigator's to do (PORTFOLIO_BUILD_PLAN.md §7.6.5). No AI collaborator
+    holds attestor key material, and nothing signed with these keys is an
+    attestation of anything.
+    """
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    seed = hashlib.sha256(TEST_ATTESTOR_DERIVATION + str(n).encode()).digest()
     return Ed25519PrivateKey.from_private_bytes(seed)
 
 
@@ -222,7 +238,7 @@ def _sample_envelopes() -> list:
         v = {"name": name,
              "projection": _projection_for_vector(env),
              "signing_bytes_hex": env.signing_bytes().hex(),
-             "signature_hex": env.signature.hex(),
+             "signature_set_hex": env.signatures.encode().hex(),
              "record_hash_hex": env.record_hash().hex(),
              "wire_hex": env.encode().hex()}
         if note:
@@ -306,7 +322,10 @@ def _sample_entries() -> list:
              "event_type": entry.event_type, "payload_hex": entry.payload.hex(),
              "prev_hex": entry.prev.hex(), "ext": entry.ext,
              "signing_bytes_hex": entry.signing_bytes().hex(),
-             "signature_hex": entry.signature.hex(),
+             "signature_set_hex": entry.signatures.encode().hex(),
+             "attestor_count": len(entry.signatures.attestors),
+             "threshold_required": (entry.signatures.policy.required
+                                    if entry.signatures.policy else 0),
              "record_hash_hex": entry.record_hash().hex(),
              "wire_hex": entry.encode().hex()}
         if note:
@@ -336,6 +355,51 @@ def _sample_entries() -> list:
         prev=bytes.fromhex("55" * 32)),
          "application floats are fine INSIDE an opaque payload; the no-float "
          "rule binds the envelope and the ext map, not attested blobs")
+
+    # --- n-of-m attestation: the two cases the work order requires --------- #
+    # AUTHOR-ONLY, zero attestors. This is what every substrate emits today and
+    # it is a valid instance of the set model, not a case outside it.
+    author_only_entry = EntryV1.from_json_payload(
+        seq=5, ts_us=3_000_000, event_type="BENCHMARK_FREEZE",
+        payload_obj={"bench": "caduceus-bench", "version": "v1.2.1"},
+        prev=bytes.fromhex("66" * 32))
+    author_only_entry.sign(sk, policy=attest.POLICY_AUTHOR_ONLY)
+    out.append({"name": "entry-attest-author-only",
+                "seq": author_only_entry.seq, "ts_us": author_only_entry.ts_us,
+                "event_type": author_only_entry.event_type,
+                "payload_hex": author_only_entry.payload.hex(),
+                "prev_hex": author_only_entry.prev.hex(), "ext": None,
+                "signing_bytes_hex": author_only_entry.signing_bytes().hex(),
+                "signature_set_hex": author_only_entry.signatures.encode().hex(),
+                "attestor_count": 0, "threshold_required": 0,
+                "record_hash_hex": author_only_entry.record_hash().hex(),
+                "wire_hex": author_only_entry.encode().hex(),
+                "note": "author signature, zero attestors, threshold 0 — the "
+                        "shape every substrate emits today"})
+
+    # AUTHOR PLUS TWO ATTESTORS under a 2-of-3 policy. The attestor keys are
+    # derived from published constants and are TEST KEYS; no real attestation is
+    # produced by this session and no attestor has been recruited.
+    attested = EntryV1.from_json_payload(
+        seq=6, ts_us=4_000_000, event_type="BENCHMARK_FREEZE",
+        payload_obj={"bench": "caduceus-bench", "version": "v1.2.1"},
+        prev=bytes.fromhex("77" * 32))
+    attested.sign(sk, policy=attest.POLICY_2_OF_3)
+    attested.attest_with(_test_attestor(1), role=attest.ROLE_PROCESS)
+    attested.attest_with(_test_attestor(2), role=attest.ROLE_METHODOLOGY)
+    out.append({"name": "entry-attest-author-plus-two",
+                "seq": attested.seq, "ts_us": attested.ts_us,
+                "event_type": attested.event_type,
+                "payload_hex": attested.payload.hex(),
+                "prev_hex": attested.prev.hex(), "ext": None,
+                "signing_bytes_hex": attested.signing_bytes().hex(),
+                "signature_set_hex": attested.signatures.encode().hex(),
+                "attestor_count": 2, "threshold_required": 2,
+                "record_hash_hex": attested.record_hash().hex(),
+                "wire_hex": attested.encode().hex(),
+                "note": "author + 2-of-3 independent attestors; the author "
+                        "signature does NOT count toward the threshold. "
+                        "Attestor keys are TEST KEYS."})
     return out
 
 
@@ -389,6 +453,79 @@ def _near_miss_vectors() -> list:
          "signature_hex": good.hex(), "reason": "the one signature that must verify",
          "must_verify": True},
     ]
+
+
+def _attest_reject_vectors() -> list:
+    """Signature sets a conforming verifier MUST reject or mark not-met.
+
+    Adversarial cases specific to the n-of-m model. Each one is a way an
+    attested artifact could be made to look better than it is.
+    """
+    sk = conformance_private_key()
+    a1, a2 = _test_attestor(1), _test_attestor(2)
+    author_pk = codec.public_key_bytes(sk.public_key())
+
+    def entry():
+        e = EntryV1.from_json_payload(
+            seq=9, ts_us=5_000_000, event_type="BENCHMARK_FREEZE",
+            payload_obj={"bench": "x"}, prev=bytes.fromhex("88" * 32))
+        e.sign(sk, policy=attest.POLICY_2_OF_3)
+        return e
+
+    out = []
+
+    # The author signing twice must not satisfy a 2-of-3 threshold.
+    e = entry()
+    forged = attest.SignatureSet(
+        author=e.signatures.author,
+        attestors=[attest.Attestation(public_key=author_pk,
+                                      signature=e.signatures.author.signature)],
+        policy=attest.POLICY_2_OF_3)
+    out.append({"name": "attest-author-counted-as-attestor",
+                "signature_set_hex": cbor.encode(
+                    {"a": forged.author.to_map(),
+                     "at": [forged.attestors[0].to_map()],
+                     "th": attest.POLICY_2_OF_3.to_map()}).hex(),
+                "reason": "an attestor key equal to the author key must be "
+                          "rejected; otherwise 2-of-3 degrades to one signer"})
+
+    # One attestor under a 2-of-3 policy: valid signatures, threshold not met.
+    e = entry(); e.attest_with(a1, role=attest.ROLE_PROCESS)
+    out.append({"name": "attest-threshold-not-reached",
+                "signature_set_hex": e.signatures.encode().hex(),
+                "signing_bytes_hex": e.signing_bytes().hex(),
+                "reason": "one independent attestor under a 2-of-3 policy; "
+                          "the entry must report threshold_not_reached, never "
+                          "pass with a footnote"})
+
+    # Attestors present but out of canonical order.
+    e = entry(); e.attest_with(a1); e.attest_with(a2)
+    ordered = sorted(e.signatures.attestors, key=lambda x: bytes(x.public_key))
+    out.append({"name": "attest-attestors-out-of-order",
+                "signature_set_hex": cbor.encode(
+                    {"a": e.signatures.author.to_map(),
+                     "at": [ordered[1].to_map(), ordered[0].to_map()],
+                     "th": attest.POLICY_2_OF_3.to_map()}).hex(),
+                "reason": "attestor signatures must be sorted by key, bytewise"})
+
+    # The same attestor twice must not count as two.
+    e = entry(); e.attest_with(a1)
+    dup = e.signatures.attestors[0].to_map()
+    out.append({"name": "attest-duplicate-attestor",
+                "signature_set_hex": cbor.encode(
+                    {"a": e.signatures.author.to_map(),
+                     "at": [dup, dup],
+                     "th": attest.POLICY_2_OF_3.to_map()}).hex(),
+                "reason": "a duplicated attestor must not count twice toward "
+                          "the threshold"})
+
+    # A threshold larger than the roster it is drawn from is incoherent.
+    out.append({"name": "attest-threshold-exceeds-roster",
+                "signature_set_hex": cbor.encode(
+                    {"a": entry().signatures.author.to_map(),
+                     "th": {"n": 4, "m": 3}}).hex(),
+                "reason": "requiring 4 of a roster of 3 can never be met"})
+    return out
 
 
 def _schema_reject_vectors() -> list:
@@ -469,6 +606,15 @@ def build() -> dict:
             "chain_hex": codec.DOMAIN_CHAIN.hex(),
         },
         "genesis_prev_hex": codec.GENESIS_PREV.hex(),
+        "test_attestor_keys": {
+            "WARNING": "TEST KEYS. No attestor has been recruited; no real "
+                       "attestation exists. See PORTFOLIO_BUILD_PLAN.md 7.6.",
+            "derivation": "Ed25519 private scalar = SHA-256(derivation_input || str(n))",
+            "derivation_input_utf8": TEST_ATTESTOR_DERIVATION.decode(),
+            "public_keys_hex": [
+                codec.public_key_bytes(_test_attestor(n).public_key()).hex()
+                for n in (1, 2)],
+        },
         "cbor": _cbor_vectors(),
         "cbor_reject": _cbor_reject_vectors(),
         "quantize": _quantize_vectors(),
@@ -476,6 +622,7 @@ def build() -> dict:
         "dac": _sample_envelopes(),
         "entry": _sample_entries(),
         "near_miss": _near_miss_vectors(),
+        "attest_reject": _attest_reject_vectors(),
         "schema_reject": _schema_reject_vectors(),
     }
 

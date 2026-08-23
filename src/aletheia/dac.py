@@ -55,7 +55,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
-from .provenance import codec, envelope as _env, quantize
+from .provenance import attest as _attest, cbor as _cbor, codec, envelope as _env, quantize
 from .provenance.envelope import ConfidenceV1, DacV1, ValidityV1
 
 
@@ -201,6 +201,14 @@ class Producer:
 
     def sign(self, message: bytes) -> bytes:
         return self._sk.sign(message)
+
+    def seal(self, domain: bytes, struct: dict, policy=None):
+        """Produce an author-only signature set over a structure.
+
+        Signatures are a SET even when there is one of them, so multi-party
+        attestation never forces a format version (docs/WIRE_FORMAT.md §5.6).
+        """
+        return _attest.author_only(self._sk, domain, struct, policy)
 
     @staticmethod
     def verify(pk: Ed25519PublicKey, message: bytes, sig: bytes) -> bool:
@@ -391,7 +399,10 @@ class DAC:
             claim_id=uuid.UUID(self.id).bytes,
         )
         if self.sig:
-            env.signature = bytes.fromhex(self.sig)
+            # `sig` carries the hex of the encoded signature set, not a bare
+            # signature. It stays a hex string, so the public API is unchanged.
+            env.signatures = _attest.SignatureSet.from_map(
+                _cbor.decode(bytes.fromhex(self.sig)))
         return env
 
     def signing_bytes(self) -> bytes:
@@ -697,7 +708,7 @@ class Substrate:
             requires_hitl=combined["requires_hitl"],
         )
         dac.prev_hash = self.store.head().hex()      # signed, not stamped after
-        dac.sig = producer.sign(dac.signing_bytes()).hex()
+        dac.sig = producer.seal(codec.DOMAIN_DAC, dac.to_v1().to_map()).encode().hex()
         return self.store.append(dac)
 
     def verify(self, dac: DAC) -> bool:

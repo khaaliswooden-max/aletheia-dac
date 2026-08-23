@@ -45,6 +45,9 @@ src/aletheia/
     codec.py     domain-separated signing / verification / record hashing
     envelope.py  the v1 DAC envelope + monotone propagation (exact, on ints)
     entry.py     the v1 chain entry (opaque attested payload)
+    attest.py    n-of-m attestation: signatures as a SET (author + attestors),
+                 threshold policy, roster. Required by the build plan §7.6.9 —
+                 a one-signature schema would force a v2 format.
     keystore.py  persistent Ed25519 keystore + trust root
     legacy.py    READ-ONLY verifiers for the five pre-v1 formats
     verifier.py  format detection + one verifier for every substrate
@@ -78,6 +81,10 @@ implementation detail. Before changing `src/aletheia/provenance/`:
   quantization is not idempotent that way and the value drifts downward.
 - Chains are append-only across the whole portfolio. Legacy artifacts are
   verified under a v0 tag and are NEVER re-signed, migrated, or rewritten.
+- Signatures are a SET even when there is one. The author signature never counts
+  toward an attestation threshold, and "threshold not reached" is a failure, not
+  a footnote. No AI collaborator holds attestor key material; no attestor has
+  been recruited and no real attestation exists.
 
 ## Commands
 ```bash

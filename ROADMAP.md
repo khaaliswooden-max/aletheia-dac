@@ -22,9 +22,16 @@ Portfolio Wave 1, Track A. One wire format for all five substrates.
 - `prev` moved inside the producer signature: a producer attests to its own
   chain position, as CADUCEUS-004 T1 and EPHEMERIS A7(3) both require.
 - Domain-separated signing; the envelope carries its producer's public key.
-- 91 committed, signed conformance vectors including the adversarial set
+- n-of-m attestation modelled from the start: an entry's signatures are a set
+  (author + independent attestors), with the threshold policy recorded in the
+  entry and attestor keys resolvable against a signed roster. Required by
+  PORTFOLIO_BUILD_PLAN §7.6.9 — a one-signature schema would have forced a v2
+  the moment the first attestor signs. No attestor is recruited and no real
+  attestation exists; author-only is a valid instance of the model.
+- 98 committed, signed conformance vectors including the adversarial set
   (reordering, unknown fields, empty parents, maximum lengths, non-ASCII,
-  near-miss signatures). These are what Rust and embedded C validate against.
+  near-miss signatures, and the attestation rejections). These are what Rust and
+  embedded C validate against.
 - One verifier across all five substrates, with per-entry format reporting and
   read-only v0 tags for every legacy format. No historical entry re-signed.
 - Persistent Ed25519 keystore with a local trust root.

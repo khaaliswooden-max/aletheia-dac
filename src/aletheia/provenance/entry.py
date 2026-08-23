@@ -40,7 +40,7 @@ from typing import Optional
 
 import json
 
-from . import cbor, codec, quantize
+from . import attest, cbor, codec, quantize
 from .envelope import SchemaError, _reject_unknown, _require
 
 FORMAT_VERSION = 1
@@ -57,7 +57,13 @@ class EntryV1:
     payload: bytes                # opaque; attested, never interpreted
     prev: bytes = codec.GENESIS_PREV
     ext: Optional[dict] = None
-    signature: bytes = b""
+    #: An author signature plus zero or more attestor signatures. Required to be
+    #: a set from the start: the portfolio has decided on author + 2-of-3
+    #: independent attestation for benchmark commits, and a one-signature schema
+    #: would force a v2 the moment the first attestor signs
+    #: (PORTFOLIO_BUILD_PLAN.md 7.6.9). Author-only with zero attestors is a
+    #: valid instance, and is what every substrate emits today.
+    signatures: Optional[attest.SignatureSet] = None
 
     def to_map(self) -> dict:
         m = {
@@ -116,27 +122,58 @@ class EntryV1:
     def signing_bytes(self) -> bytes:
         return codec.signing_bytes(codec.DOMAIN_CHAIN, self.to_map())
 
+    @property
+    def signature(self) -> bytes:
+        """The author signature alone, for callers that only need that."""
+        return b"" if self.signatures is None else bytes(self.signatures.author.signature)
+
     def encode(self) -> bytes:
-        return cbor.encode({"s": bytes(self.signature), "e": self.to_map()})
+        _require(self.signatures is not None, "entry is not signed")
+        return cbor.encode({"e": self.to_map(), "sig": self.signatures.to_map()})
 
     @classmethod
     def decode(cls, data: bytes) -> "EntryV1":
         outer = cbor.decode(data)
         _require(isinstance(outer, dict), "wire form must be a map")
-        _reject_unknown(outer, {"s", "e"}, "wire form")
-        _require("s" in outer and "e" in outer, "wire form requires 's' and 'e'")
-        _require(isinstance(outer["s"], bytes) and len(outer["s"]) == codec.SIGNATURE_LEN,
-                 f"signature must be {codec.SIGNATURE_LEN} bytes")
+        _reject_unknown(outer, {"sig", "e"}, "wire form")
+        _require("sig" in outer and "e" in outer, "wire form requires 'e' and 'sig'")
         entry = cls.from_map(outer["e"])
-        entry.signature = outer["s"]
+        entry.signatures = attest.SignatureSet.from_map(outer["sig"])
         return entry
 
-    def sign(self, private_key) -> "EntryV1":
-        self.signature = codec.sign(private_key, codec.DOMAIN_CHAIN, self.to_map())
+    def sign(self, private_key, policy=None) -> "EntryV1":
+        """Seal with an author signature and no attestors."""
+        self.signatures = attest.author_only(
+            private_key, codec.DOMAIN_CHAIN, self.to_map(), policy)
+        return self
+
+    def attest_with(self, private_key, role=None) -> "EntryV1":
+        """Add an independent attestor signature over the same bytes.
+
+        Precondition:  the entry is already author-signed and the attestor key
+                       differs from the author key.
+        Postcondition: the record hash changes, because the hash covers the
+                       whole set. Attestations belong at seal time; history is
+                       never re-attested (PORTFOLIO_BUILD_PLAN.md 7.6.7).
+        """
+        _require(self.signatures is not None, "entry is not author-signed")
+        self.signatures = attest.attest(
+            self.signatures, private_key, codec.DOMAIN_CHAIN, self.to_map(), role)
         return self
 
     def verify(self, public_key) -> bool:
+        """Verify the author signature against a specific key."""
+        if self.signatures is None:
+            return False
         return codec.verify(public_key, codec.DOMAIN_CHAIN, self.to_map(), self.signature)
 
+    def verify_signatures(self, roster=None) -> dict:
+        """Full report: author signature, attestor signatures, threshold."""
+        if self.signatures is None:
+            return {"ok": False, "problems": ["unsigned"]}
+        return self.signatures.verify(self.signing_bytes(), roster)
+
     def record_hash(self) -> bytes:
-        return codec.record_hash(codec.DOMAIN_CHAIN, self.to_map(), self.signature)
+        _require(self.signatures is not None, "entry is not signed")
+        return codec.record_hash(codec.DOMAIN_CHAIN, self.to_map(),
+                                 self.signatures.encode())

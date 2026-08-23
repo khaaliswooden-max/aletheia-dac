@@ -9,7 +9,13 @@ what separates one kind of signature from another.
 Construction
     msg          = DOMAIN || deterministic_cbor(struct)
     signature    = Ed25519(sk, msg)                       -- over the bytes, not a digest
-    record_hash  = SHA-256(msg || signature)
+    record_hash  = SHA-256(msg || deterministic_cbor(signature_set))
+
+The record hash covers the ENTIRE signature set -- the author signature and
+every attestor signature -- not just the author's. Stripping an attestor from a
+sealed entry therefore breaks the chain, which is the point: without this, a
+2-of-3 attested entry could be silently downgraded to author-only and still
+verify. See attest.py and PORTFOLIO_BUILD_PLAN.md 7.6.9.
 
 Why sign the message and not a digest
     Ed25519 already hashes internally. Signing a SHA-256 output with plain
@@ -64,17 +70,20 @@ def signing_bytes(domain: bytes, struct: dict) -> bytes:
     return domain + cbor.encode(struct)
 
 
-def record_hash(domain: bytes, struct: dict, signature: bytes) -> bytes:
-    """SHA-256 over the signed bytes and the signature.
+def record_hash(domain: bytes, struct: dict, signatures: bytes) -> bytes:
+    """SHA-256 over the signed bytes and the encoded signature set.
 
-    This is the value a successor entry carries as its ``prev``, so the chain
-    binds both the content and the attestation of every predecessor.
+    Inputs:  the domain tag, the structure map, and the deterministic CBOR of
+             the structure's signature set.
+    Outputs: the 32-byte value a successor entry carries as its ``prev``.
+    Precondition:  ``signatures`` is the canonical encoding of a SignatureSet.
+    Postcondition: the chain binds the content AND every attestation of every
+                   predecessor, so an attestation cannot be added or removed
+                   without breaking the chain.
     """
-    if len(signature) != SIGNATURE_LEN:
-        raise VerificationError(
-            f"signature must be {SIGNATURE_LEN} bytes, got {len(signature)}"
-        )
-    return hashlib.sha256(signing_bytes(domain, struct) + signature).digest()
+    if not isinstance(signatures, (bytes, bytearray)) or not signatures:
+        raise VerificationError("signatures must be the encoded signature set")
+    return hashlib.sha256(signing_bytes(domain, struct) + bytes(signatures)).digest()
 
 
 def sign(private_key, domain: bytes, struct: dict) -> bytes:

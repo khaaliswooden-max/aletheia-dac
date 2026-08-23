@@ -295,8 +295,11 @@ One construction, both structures.
 ```
 msg          = DOMAIN ‖ deterministic_cbor(structure)
 signature    = Ed25519(secret_key, msg)
-record_hash  = SHA-256(msg ‖ signature)
+record_hash  = SHA-256(msg ‖ deterministic_cbor(signature_set))
 ```
+
+The record hash covers the **entire signature set** — the author signature and
+every attestor signature — not just the author's. See §5.6.
 
 ### 5.1 Domain separation
 
@@ -328,10 +331,11 @@ legacy implementations disagreed here in two different ways — PHRONESIS signed
 `bytes.fromhex(entry_hash)`, Proteus Loop B signed the 64 ASCII hex characters —
 and neither convention bought anything.
 
-### 5.3 The record hash binds the attestation
+### 5.3 The record hash binds every attestation
 
-`record_hash` covers the signature as well as the content, so an entry cannot be
-re-attested without changing the value its successor chains onto.
+`record_hash` covers the whole signature set as well as the content, so an entry
+cannot be re-attested — or have an attestation stripped — without changing the
+value its successor chains onto. See §5.6.
 
 ### 5.4 Genesis
 
@@ -356,6 +360,71 @@ signing**, not after. Vector `near-miss-different-prev` pins that a signature
 over the same claim at a different chain position must fail.
 
 ---
+
+### 5.6 Signatures are a SET, from the start
+
+An entry's signatures are a set, never a single field:
+
+```
+signature-set = {
+  "a"    : attestation,       the author. NEVER counts toward the threshold.
+  ? "at" : [+ attestation],   independent attestors, sorted by key
+  ? "th" : threshold-policy,  the policy in force when this entry was sealed
+}
+```
+
+**Why this is in v1 and not deferred.** The portfolio has decided on multi-party
+attestation for benchmark commits — author signature plus 2-of-3 independent
+attestors (PORTFOLIO_BUILD_PLAN.md §7.6.2). A schema that holds exactly one
+signature cannot carry that, and discovering it after v1 ships forces a v2 for
+purely structural reasons (§7.6.9). Modelling it now costs very little.
+
+**Recruitment is open and no attestation exists.** No attestor has been
+recruited, no real attestation has been produced, and no AI collaborator holds
+attestor key material. **An author signature with zero attestors is a valid
+instance of this model** — it is what every substrate emits today, and it is not
+a special case sitting outside the schema.
+
+Three rules a conforming implementation MUST enforce:
+
+1. **The author signature never counts toward the threshold** (§7.6.2).
+   Otherwise 2-of-3 degrades to one independent signer. An attestor key equal to
+   the author's key MUST be rejected: independence is a recruitment property
+   (§7.6.4) that no encoding can check, but this much is mechanically checkable.
+2. **Attestors are canonically ordered** — sorted by public key, bytewise, with
+   no duplicates — so the same set of attestors always encodes to the same bytes
+   and a duplicated attestor cannot count twice.
+3. **Threshold not reached is a failure, never a footnote** (§7.6.7). A verifier
+   MUST report an entry that does not meet its own recorded policy. A ceremony
+   with a documented bypass is not a ceremony.
+
+**The policy is recorded in the entry**, not looked up at verification time. A
+policy that could be edited afterwards would let a 2-of-3 entry be reinterpreted
+as author-only. `n` MUST be ≤ `m`.
+
+**Everyone signs the same bytes.** An attestor signs `DOMAIN ‖ cbor(structure)`,
+exactly what the author signed, so an attestation is unambiguous about what was
+attested and verification is one code path.
+
+**Attestations are made at seal time, not added to history.** Because the record
+hash covers the whole set, adding an attestation to a committed entry changes
+its hash and breaks the chain. That is correct rather than inconvenient:
+§7.6.7 says existing single-signed history is never rewritten, and later
+independent review is recorded as a **new, forward-only corroboration entry** —
+"I verified the chain from genesis to entry N on date D" — which records the
+review as a fact about a verification performed later, without pretending it
+happened at the time.
+
+Conversely, the hash covering the set is what stops an attested entry being
+**silently downgraded**: stripping an attestor breaks the chain rather than
+quietly turning a 2-of-3 commit into an author-only one.
+
+**Rosters.** Attestor key fingerprints MUST be resolvable against a signed
+roster. Each attestor generates and holds their own key; attestor keys MUST NOT
+be issued, escrowed or rotated by the attested party — an attestation signed
+with a key the attested party controls attests to nothing (§7.6.7). Roster
+changes are themselves chain entries: an entry whose `et` is `ROSTER_UPDATE` and
+whose `ep` is the encoded roster.
 
 ## 6. The DAC envelope
 
@@ -537,13 +606,18 @@ byte-for-byte, and rejects every vector marked for rejection.
 | `quantize` | 12 | every rounding direction at a boundary, including the exact-rational divergence |
 | `quantize_reject` | 6 | range limits, non-finite input |
 | `dac` | 6 | signing bytes, signature, record hash, wire form |
-| `entry` | 5 | including a float-bearing opaque payload |
+| `entry` | 7 | including a float-bearing opaque payload, an author-only set, and an author-plus-two-attestor set |
 | `near_miss` | 8 | signatures one bit, one byte, one domain or one `prev` away from valid |
+| `attest_reject` | 5 | author counted as an attestor, threshold not reached, unordered and duplicated attestors, threshold exceeding its roster |
 | `schema_reject` | 14 | unknown fields, missing fields, range violations, unsorted parents, REGULATED without the gate |
 
 The adversarial categories the brief requires — field reordering, unknown fields,
 empty parent sets, maximum-length fields, non-ASCII, near-miss signatures — are
 each covered, and a test asserts none of them silently disappears.
+
+The two attestation cases the work order requires are
+`entry-attest-author-only` (zero attestors) and `entry-attest-author-plus-two`
+(a 2-of-3 policy met by two independent attestors).
 
 ### 10.1 The conformance signing key is a test key
 
@@ -554,9 +628,13 @@ private scalar = SHA-256("zil-provenance/v1/conformance-test-key/DO-NOT-USE-IN-P
 public key     = 02bcf62706e024b12a2ca4f7a75ae4dab5b0356fdfe23269b05a7f068664b9f5
 ```
 
-Anyone can rederive it and regenerate the fixtures. It has **no custody and no
-provenance weight and MUST NOT sign anything real.** No AI collaborator holds or
-handles production key material.
+The attestor keys in the attestation vectors are derived the same way, from
+`"zil-provenance/v1/conformance-test-attestor/DO-NOT-USE-IN-PRODUCTION/" ‖ n`.
+
+Anyone can rederive them and regenerate the fixtures. They have **no custody and
+no provenance weight and MUST NOT sign anything real.** No AI collaborator holds
+or handles production key material, and **nothing signed with the attestor test
+keys is an attestation of anything** — no attestor has been recruited.
 
 ### 10.2 Wave 1 exit
 
@@ -579,10 +657,12 @@ For an implementer starting from this document:
 4. Build the structures. Reject unknown keys (§7.1).
 5. Implement `msg = DOMAIN ‖ cbor(struct)`; sign `msg`, not a digest (§5.2).
 6. Read the chain head **before** signing (§5.5).
-7. Check `record_hash = SHA-256(msg ‖ signature)` against the `dac` and `entry`
-   vectors.
-8. Run `near_miss` and `schema_reject`. An implementation that passes the happy
-   path and fails these is not conforming — it is permissive.
+7. Build the signature set (§5.6). Author-only with zero attestors is the normal
+   case; do not shortcut it to a bare signature field.
+8. Check `record_hash = SHA-256(msg ‖ cbor(signature_set))` against the `dac`
+   and `entry` vectors.
+9. Run `near_miss`, `attest_reject` and `schema_reject`. An implementation that
+   passes the happy path and fails these is not conforming — it is permissive.
 
 ---
 
@@ -603,8 +683,14 @@ Stated so no reader infers more than was built.
 5. **Two legacy formats are permanently pinned** (§7.4) with known defects
    (D3 above, BEC-1 and BEC-2). They cannot be repaired in place without
    editing a frozen benchmark.
-6. **Multi-party attestation** is untouched. Single-attestor commits remain the
-   largest methodology gap the portfolio names about itself.
+6. **Multi-party attestation is modelled but not practised.** The schema carries
+   the set, the threshold policy and the roster resolution (§5.6), and the
+   verifier enforces all three. What does not exist is attestors: recruitment is
+   open (PORTFOLIO_BUILD_PLAN.md §7.6.5 — three roles, seven people
+   portfolio-wide), no real attestation has been produced, and every entry any
+   substrate writes today is author-only. Single-attestor commits remain the
+   largest methodology gap the portfolio names about itself; this format removes
+   the structural obstacle to closing it, and nothing more.
 
 ---
 
