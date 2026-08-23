@@ -138,12 +138,20 @@ Proteus v1.0.2 bundle hash and the Caduceus LEDGER #0004 artifacts both await
 operator action. Bitcoin confirmation latency is roughly 6–24 hours, so this is
 wall-clock, not labor.
 
-### 3.4 Engage a registered USPTO patent practitioner
+### 3.4 Engage a registered USPTO patent practitioner — now urgent
 
 `CADUCEUS-PRACTITIONER-001 §5` defines a twelve-step sequence whose **step 1 is
 "identify and engage practitioner."** Three Caduceus PPA skeletons and the
 PHRONESIS cross-modal-fabric PPA all wait on this one person. It is the longest-
 lead non-engineering item in the portfolio and it is not staffed.
+
+**This moved from long-lead to urgent on inspection.** §7.1.2 establishes that
+the three PPA drafting targets have been publicly readable since 2026-06-09. If
+that is the operative disclosure date, a US bar date around **2027-06-09** is
+already running and foreign rights may already be encumbered. The first question
+to the practitioner is no longer claim drafting — it is whether the existing
+public repository constitutes enabling disclosure, and what that does to the
+filing calendar.
 
 ---
 
@@ -229,6 +237,9 @@ construction needed"]
 `SECURITY.md` names single-attestor commits as the largest known methodology gap
 in the whole ZCS-6 approach. The schema is estimated at 3 days; finding
 independent attestors willing to sign is the actual cost, and it is unstaffed.
+The protocol is now specified in §7.6 — author signature plus 2-of-3
+independent, three roles, seven people portfolio-wide — so this is a bounded
+recruitment task rather than an open design question.
 
 ---
 
@@ -270,15 +281,110 @@ Mistral-7B inference host. The scenario library of §5.
 - TPM 2.0 for measured boot.
 - Anti-tamper enclosure with tamper-evident sealing and chain-of-custody
   logging.
-- **Radiation path decision:** NASA Class B parts (expensive, long-lead) or
-  COTS with documented TMR / watchdog / ECC mitigation. Jetson Orin NX is
-  consumer-grade and will not fly as-is. The roadmap marks this SPECULATIVE and
-  it remains an open architectural decision, not a procurement task.
+- **Radiation path:** resolved — see D5 below.
 - Facility access: proton and heavy-ion beam time, thermal-vacuum cycling, and
   vibration to NASA-STD-7003A. **Beam time is booked months ahead and is the
   schedule driver for v1.0, not the engineering.** [PLAUSIBLE — general
   characteristic of accelerator facility scheduling; specific lead times not
   confirmed with any named facility]
+
+#### D5 — radiation path. RESOLVED: two domains, and HF-10 already requires it.
+
+**The question was a false binary.** "Class B parts *or* mitigated COTS" treats
+the Phronesis Core as one compute domain that must be classified one way. HF-10
+— a **gating** floor, not scoring — already forbids that. Verbatim:
+
+> All decisions in the safety-critical loop ... execute on a formally verified
+> deterministic kernel with worst-case execution time bounded and proven,
+> **independent of any ML inference subsystem**. The kernel runs on
+> **hardware-isolated compute** with bus-level enforcement: the ML subsystem
+> **CANNOT bypass the kernel at the bus level, not by policy**.
+
+Two hardware-isolated compute domains are therefore mandatory regardless of
+radiation [VERIFIED — `vbx_isps_bench_v1_1.json`, HF-10, scope `substrate`,
+gating]. The v1.0 roadmap already anticipates this shape — "a dedicated MCU
+running the kernel + bus, with the AI compute on a separate AP processor
+connected via a controlled message bus." The radiation decision simply follows
+the split that HF-10 compels.
+
+**Decision: classify by domain, not by module.**
+
+| Domain | Contents | Radiation posture |
+|---|---|---|
+| **Safety** | Mercury kernel, MVCI gate, safety bus, watchdog, Aletheia signing | **Rad-hard / NASA Class B.** Small, deterministic, low compute — Class B is both feasible and affordable here. |
+| **Advisory** | Civium 7B inference | **Mitigated COTS.** No alternative exists. |
+
+**Why the advisory domain has no Class B option.** Rad-hard flight processors
+in the RAD750 / RAD5545 / GR740 class deliver on the order of hundreds of MIPS
+to a few GOPS, against a 7B Q4 model needing roughly 4 GB of resident weights
+and tens of GFLOPS for usable latency. Rad-hard memory is not sold in the tens
+of gigabytes. **There is no NASA Class B part that runs Mistral-7B**, so
+"Class B preferred" was never an available option for Civium.
+[PLAUSIBLE — part-class performance from training knowledge, not from verified
+datasheets; this session has no vendor-datasheet access. Check 9 requires
+confirming against manufacturer datasheets before this reaches a partner
+document. The *conclusion* is robust to an order of magnitude either way.]
+
+**Why COTS upsets are architecturally safe.** HF-10 requires the kernel to work
+independent of the ML subsystem, so an advisory-domain SEU that forces a reboot
+degrades the system to deterministic-floors-only — a defined state, not a
+failure. **That state is already under test**: `substrate/requirements-llm.txt`
+records that with the LLM extra absent,
+`test_hard_safety_floor_blocks_llm_on_hypoxia`,
+`test_hard_safety_floor_blocks_llm_on_multi_fault`, and
+`test_physical_validity_blocks_llm` all pass, confirmed by direct run. The
+radiation degradation mode is the LLM-absent mode, and it is verified today.
+
+**The real cost is HF-12, and it is scoring, not gating.** HF-12 requires ≥70%
+autonomous resolution on AUTONOMOUS_ELIGIBLE events. Advisory-domain downtime
+pushes those events to safe-passive fallback, so:
+
+> **A_min = 0.70 / R_up**
+
+where `R_up` is the measured autonomous-resolution ratio with the LLM
+available. At `R_up` = 0.85 the advisory domain may be unavailable ~18% of the
+time; at 0.95, ~26%. Two consequences: the availability requirement is
+**loose**, which further supports COTS; and if `R_up` ≤ 0.70 no availability
+saves it, so `R_up` must be measured before any radiation budget is
+meaningful. [PLAUSIBLE — the relation is derived; the `R_up` values are
+illustrative assumptions, not measurements. Measuring `R_up` is a v0.3
+calibration-audit deliverable and gates this whole calculation.]
+
+**Non-negotiable mitigation: single-event latch-up protection.** SEL is the
+destructive failure mode — one heavy ion can take the part permanently. Current
+limiting with fast detect-and-power-cycle is mandatory on the advisory domain.
+ECC covers single-bit DRAM upsets; multi-bit and SEFI take the reboot path,
+which the architecture already tolerates. For a Mars-class profile behind modest
+shielding, **SEE dominates TID** — unlike LEO/GEO or an outer-planet mission —
+so the design driver is upset and latch-up rate, not dose accumulation.
+[PLAUSIBLE — qualitative environment reasoning; no mission-specific analysis
+run. See the unknowns below.]
+
+**A power finding that falls out of this.** A 200 W-class advisory domain cannot
+run continuously in a PLSS budget: 200 W × 8 h = 1.6 kWh, against an xEMU-class
+suit battery on the order of 0.8–1.2 kWh — the AI domain alone would exceed the
+entire historical suit energy budget. [PLAUSIBLE — Fermi estimate, Check 2;
+battery figures are order-of-magnitude from training knowledge and need
+datasheet confirmation.] **The advisory domain must be event-driven, powered
+only for nuanced-band decisions.** This is fortunate rather than merely
+constraining: a powered-down part accumulates no SEE, so the duty cycle that
+the thermal and energy budget forces is also the cheapest radiation mitigation
+available.
+
+**Named unknowns — none of these are optional, and none are scoped today:**
+
+1. A **mission-specific radiation environment analysis** (OLTARIS / CREME96 /
+   SPENVIS class) producing TID and LET spectra for the actual shielding
+   configuration. Nothing downstream is quantifiable without it.
+2. **Beam-test-measured SEU, SEFI, and SEL cross-sections for the selected
+   part.** Vendor figures are claims to verify, not facts (Check 9).
+3. **`R_up` measured** on the v0.3 calibration audit, which sets `A_min`.
+
+**TRL honesty (Check 5).** This architecture is TRL 2–3 — analysis only,
+however detailed. The v1.0 campaign (proton and heavy-ion beam, thermal
+vacuum, vibration to NASA-STD-7003A) is what moves it to TRL 5–6 in a relevant
+environment. Do not describe it as flight-credible before that campaign
+produces data, in capture documents above all.
 
 **v1.2:** a spacesuit OEM partner (ILC Dover, Collins, Axiom class) owning HF-1
 through HF-7 and HF-11. Pre-contractual.
@@ -295,49 +401,123 @@ The blueprint carries a genuine bill of materials. All values are `target`
 | Item | Spec | Label |
 |---|---|---|
 | Crystal | Sapphire, AR-coated, 1.2 mm | target |
-| Display | 1.4″ AMOLED, 466×466, 50,000 cd/m² peak | target |
+| Display | 1.4″ AMOLED, 466×466, **~3,000 cd/m² peak** (revised, D3) | target |
+| Display stack | Total reflectance ≤1% — AR + circular polarizer (added, D3) | target |
 | Ambient sensor | Lux + IR cut, 1 lx – 100 klx | target |
-| Mainboard | 4-layer FR4: MCU + SE + Flash + 9-DOF IMU + CSAC + GNSS | target |
+| Mainboard | 4-layer FR4: MCU + SE + Flash + 9-DOF IMU + GNSS (**no CSAC**, D2) | target |
 | Antenna | Ceramic patch, L1/L5 | target |
 | Battery | Li-ion 500 mAh, custom L-shape | target |
 | Caseback | Grade-5 titanium, IP68 / 100 m | target |
 | Envelope | 44.0 × 13.5 × 52.0 mm, 78 g, −20…+60 °C, MIL-STD-810H | target |
 
-#### Conflict 1 — A5 and A6 are mutually exclusive at 500 mAh
+#### D2 — CSAC and the A5/A6 relationship. RESOLVED: commercial variant only.
 
-[VERIFIED as arithmetic; PLAUSIBLE as a system conclusion — see the caveat]
+**Correction to an earlier reading in this document.** A prior revision framed
+A5 and A6 as mutually exclusive and raised the possibility of a v1.3 benchmark
+back-edge. That was wrong, and reading the frozen assertion text resolves it.
+No back-edge is warranted and none should be prepared.
 
-- A5 is a scoring assertion: ≥14 days on 500 mAh. `requirement`.
-- 500 mAh × 3.7 V = 1.85 Wh = 6660 J. `target` (derived from the BOM target).
-- 14 days = 1.209 × 10⁶ s.
-- Therefore the **whole-system average power budget is ≈5.5 mW** — display,
-  MCU, IMU at 50 Hz, GNSS, and CSAC combined.
-- A chip-scale atomic clock in the Microchip SA.45s class draws on the order of
-  120 mW continuous — roughly **22× the entire system budget**. `target`
-  (vendor datasheet class figure, not measured here, no EvidenceRecord).
+The frozen spec already anticipates two variants. A6, verbatim:
 
-The blueprint annotates CSAC as "(Pro)", which reads as a distinct SKU. **If it
-is a separate SKU, say so explicitly in the spec: the Pro SKU cannot claim A5 at
-500 mAh.** If it is not, this is a genuine falsification and the correct ZCS-6
-response is a v1.3 benchmark back-edge, not a firmware patch. Options: duty-
-cycle the CSAC with documented holdover degradation; grow the cell; or split the
-assertion by SKU.
+> Without GNSS, using IMU + last-known-state propagation, position drift ≤ **10
+> m** over 24 hours of stationary operation. SPECULATIVE pending hardware
+> simulation; **commercial variant may relax to ≤ 100 m, Pro variant with
+> chip-scale atomic clock (CSAC) holds 10 m.**
 
-**This decision is required before any EPHEMERIS hardware spend.**
+And §6 Out of Scope (v1.0), verbatim: *"ITAR/EAR posture. **Commercial variant
+only at v1.0.**"*
 
-#### Conflict 2 — 50,000 cd/m² has no wearable supplier
+So the blueprint's "(Pro)" annotation is **consistent with the benchmark, not in
+conflict with it** [VERIFIED — direct comparison of blueprint and
+`BENCHMARK_v1.0.md` §A6, §6], and the CSAC-bearing variant is already outside
+v1.0 scope by the benchmark's own words.
 
-[PLAUSIBLE — no supplier survey has been run; stated as a procurement risk, not
-a measured finding]
+**Decision: the v1.0 BOM carries no CSAC.** Build the commercial variant. It
+targets A5 (≥14 days) and A6 at ≤100 m, and those two do not conflict. The
+arithmetic below stands but describes a device the benchmark never asks anyone
+to build:
 
-Shipping wearable AMOLED panels peak roughly one order of magnitude below this
-figure. At 1.4″ the spec implies a microLED path with no identified volume
-supplier.
+- A5: ≥14 days on 500 mAh nominal. `requirement` (scoring assertion, and
+  self-labeled in the spec as "a market-positioning threshold (Garmin Fenix
+  class), not a derived capability threshold").
+- 500 mAh × 3.7 V = 1.85 Wh = 6660 J over 1.209 × 10⁶ s → **≈5.5 mW
+  whole-system average**. `target` (derived from a BOM target).
+- A CSAC in the Microchip SA.45s class draws on the order of 120 mW continuous,
+  roughly 22× that budget. `target` (vendor datasheet class, no EvidenceRecord).
 
-The good news is structural: **A3 audits contrast, font size, and luminance
-sweep — not an absolute nit figure.** The display spec is therefore a hardware
-choice that can be revised without touching the frozen benchmark. Revise it
-deliberately, record the revision, and do not let it drift silently.
+Three consequences follow, and all three are wins:
+
+1. **No benchmark pressure.** Nothing is falsified, nothing is softened.
+2. **Export exposure leaves the near-term build.** A CSAC is the part most
+   likely to carry ITAR/EAR exposure, and §6 already scopes v1.0 to the
+   commercial variant. This narrows §7.2 for EPHEMERIS specifically.
+3. **The most expensive line leaves the BOM.** [PLAUSIBLE — no quote obtained;
+   asserted from the part class, not from a supplier]
+
+**Residual question, deferred with the Pro variant and not on the critical
+path.** A6 specifies *stationary* operation. For a device that is stationary and
+can detect that it is stationary, position is held by not moving, not by
+inertial propagation — so the mechanism by which a CSAC improves the bound from
+100 m to 10 m is not stated in the spec, and A6 marks itself SPECULATIVE
+pending hardware simulation. **Write that mechanism down before any Pro-variant
+spend.** If it turns out a CSAC does not deliver 10 m for a stationary device,
+that is an A6 design question for a future benchmark cycle, and it should be
+surfaced as a back-edge candidate rather than absorbed silently.
+
+#### D3 — display luminance. RESOLVED: the blueprint has a units error.
+
+**The blueprint transcribed an ambient-illuminance requirement into a display-
+emission spec.** [VERIFIED — direct comparison of the two texts]
+
+A3's audit protocol, verbatim: *"Label visible at **50,000 lux** simulated
+sunlight (rendered luminance test)."* The blueprint's specification panel reads
+**"50,000 cd/m² peak"**. Lux is incident illuminance; cd/m² is emitted
+luminance. They are different quantities, and the benchmark asks for the first.
+
+Nothing needs 50,000 cd/m² of emission. What A3 requires is a **WCAG AA
+contrast ratio ≥ 4.5:1 sustained across a 1000-frame sweep at 50,000 lux
+ambient** — and it is audited on rendered frames, so it does not gate the
+panel's absolute peak luminance at all. The panel spec is a product decision,
+not a benchmark-gated one.
+
+**What actually sets legibility is stack reflectance, not peak emission.**
+Modelling reflected ambient as Lambertian veiling glare, `L_veil ≈ ρ·E/π` at
+E = 50,000 lux:
+
+| Stack reflectance ρ | Veiling glare | Peak luminance needed for 4.5:1 |
+|---|---|---|
+| 4% (bare sapphire, no AR) | ≈ 637 cd/m² | ≈ 2,700 cd/m² |
+| 2% (basic AR) | ≈ 318 cd/m² | ≈ 1,350 cd/m² |
+| 0.5% (AR + circular polarizer) | ≈ 80 cd/m² | ≈ 340 cd/m² |
+
+[PLAUSIBLE — first-principles derivation, not measured. Assumes Lambertian
+reflection, AMOLED true black, and reuse of the WCAG contrast form with its
+0.05 flare term standing in for the ambient floor. A rendered A3 audit or a
+physical sunlight measurement would upgrade it.]
+
+**Decision:** revise the BOM to a **procurable ~3,000 cd/m² peak-class panel**,
+which clears the requirement with wide margin even against bare sapphire, and
+**promote total stack reflectance to a first-class BOM line with a ≤1% target**
+(AR coating plus circular polarizer). Reflectance is roughly an 8× lever on
+required emission across the table above; peak nits alone is the expensive way
+to buy the same legibility.
+
+Two further benefits: a 3,000-nit-class panel is available from multiple
+wearable suppliers rather than requiring an unidentified microLED source, and
+it draws materially less than a hypothetical 50,000-nit panel, which relieves
+the A5 budget that §D2 leaves tight.
+
+**No benchmark change. This is a blueprint correction**, and it should be
+recorded as one — the drawing is marked SKETCH ONLY and revising it is not a
+back-edge.
+
+#### Residual A5 risk, unresolved by either decision
+
+Even without a CSAC, ≈5.5 mW whole-system average for a 466×466 AMOLED at ≥1 Hz
+refresh with a 50 Hz IMU is aggressive. A5 is scoring, not gating, and the spec
+labels it a market-positioning threshold, so this is a stretch target honestly
+declared rather than a defect. It should be tracked as a measured number at DVT,
+not asserted before then.
 
 #### Software
 
@@ -355,7 +535,8 @@ against the Track A vectors.
   themselves an engineering deliverable, and the reduction could violate A1a or
   A1b. Nothing in the roadmap scopes it.
 - EMC/FCC/CE certification; UN 38.3 Li-ion transport testing.
-- CSAC export-control screening (see §7.2).
+- ~~CSAC export-control screening~~ — removed from v1.0 scope by D2; returns
+  with the Pro variant.
 
 ### 6.4 Proteus — cheapest start, real compute bill
 
@@ -416,21 +597,103 @@ per `CADUCEUS-006`. Two proof assistants, two skill sets, one team.
 
 ## 7. Cross-cutting
 
-### 7.1 The IP gate — a decision is required
+### 7.1 The IP gate (D1) — RESOLVED, and overtaken by events
+
+#### 7.1.1 The decision itself
 
 `CADUCEUS-005 §4.1` makes **M0 "PPA filings confirmed"** the entry gate to M1.
 `CADUCEUS-PRACTITIONER-001 §5` step 12 states that beginning the Phase 5
-substrate build is **independent of the IP track**. These two statements
-conflict, and the conflict currently blocks Caduceus.
+substrate build is **independent of the IP track**. Both are right, about
+different things, and the contradiction dissolves on one distinction:
 
-Separately and not in conflict: step 11 requires the arXiv preprint to follow
-PPA filing by at least one business day, to preserve Paris Convention foreign-
-filing rights. That constraint is legal and is not in question — publication
-waits.
+**Private development is not public disclosure. Publication is.**
 
-**Required decision (principal investigator only):** does M0 block M1, or does
-substrate build proceed in parallel with the IP track while publication remains
-gated? This is a legal call and this document does not make it.
+Writing Rust crates discloses nothing to anyone. Pushing them to a public
+Apache-2.0 repository is a disclosure event in the same category as arXiv.
+
+**Decision: M0 does not block M1. M0 blocks *public* M1.** The substrate build
+proceeds now, on a private remote, and the public repository's head stays where
+it is until filings are confirmed. Step 12 is correct as written; §4.1 should be
+read as gating publication of the substrate, not its construction.
+
+#### 7.1.2 The finding that matters more
+
+**The sequencing this plan protects has already been overtaken. [VERIFIED —
+GitHub API, 2026-08-23]**
+
+`khaaliswooden-max/Caduceus-1` is a **public** repository. Its initial commit,
+`1d7bf01` "Caduceus 0", is dated **2026-06-09T20:04:21Z** and already contained
+all three PPA drafting targets under their original filenames:
+
+| Original filename (public since 2026-06-09) | Now |
+|---|---|
+| `Caduceus_IP_Filing_Target_Attack10.md` | `docs/CADUCEUS-IP-001.md` |
+| `Caduceus_IP_002_Attack27.md` | `docs/CADUCEUS-IP-002.md` |
+| `Caduceus_IP_003_F4_Clustering.md` | `docs/CADUCEUS-IP-003.md` |
+
+Also public from that commit: the full bench v1.2.1 specification, the
+CADUCEUS-005 substrate plan, -006, -007, the IEEE paper source, and both
+architecture blueprints. **That is 75 days of public availability as of today.**
+
+This contradicts `Caduceus-1/CLAUDE.md` boundary 4 — *"Nothing from
+`docs/CADUCEUS-IP-*.md` goes to arXiv, a public README, social media, or any
+external channel before the PPA filings are confirmed complete."* A public
+GitHub repository is an external channel. The boundary was written after the
+disclosure it prohibits, so this is not a breach of it by anyone; it is a
+statement that was already untrue when drafted.
+
+#### 7.1.3 What follows — and what is not mine to determine
+
+Every IP document in the repository treats **arXiv as the disclosure event**
+(`CADUCEUS-ARXIV-001` §, `CADUCEUS-IP-001` §, `LEDGER-PREP-001/002`,
+`PROBE-001` P1.6). None asks whether the repository is one. That is the gap.
+
+**A practitioner must determine** whether those documents constitute *enabling*
+disclosure under 35 U.S.C. § 112 for the claimed subject matter. There is a real
+argument either way: `CADUCEUS-IP-001` self-describes as a *"PPA SKELETON — not
+a final filing"* whose *"claim language, enablement disclosure, and prior-art
+positioning are first-principles drafts,"* which may fall short of enablement.
+The bench and substrate-plan documents are considerably more detailed. **This
+document does not make that call and no one should read it as having made it.**
+
+If 2026-06-09 is the operative date, two things follow that the plan does not
+currently track:
+
+- **United States.** 35 U.S.C. § 102(b)(1) grants a 12-month grace period for
+  the inventor's own disclosure, putting the bar date at approximately
+  **2027-06-09**. That clock is running now. [PLAUSIBLE — statutory arithmetic
+  from an assumed operative date; the date itself is a practitioner
+  determination]
+- **Absolute-novelty jurisdictions** (EPO, CN, and most others) provide no
+  such grace. Foreign rights to whatever was enabled may already be forfeited.
+
+**The practical inversion:** step 11's "arXiv must follow PPA by one business
+day" was written to protect pristine foreign-filing rights. If those rights were
+already encumbered on 2026-06-09, that instruction is guarding a door that may
+already be open, while the thing that actually binds — a US bar date roughly ten
+months out — is tracked nowhere. **Filing urgency is now the live issue;
+publication ordering is the secondary one.** The ordering constraint still
+stands and should still be honored; it is simply no longer the load-bearing
+control.
+
+#### 7.1.4 Actions
+
+1. **Proceed with M1** on a private remote, per §7.1.1.
+2. **Escalate to the practitioner as the priority item**, supplying the date
+   `2026-06-09`, the commit `1d7bf01`, and the file list above. This is now the
+   first question to put to them, ahead of claim drafting.
+3. **Track 2027-06-09 as a provisional US bar date** until a practitioner
+   replaces it with a real one.
+4. **Do not delete or force-push the history.** Removal does not undo
+   disclosure — forks, clones, archives, and the public event stream persist —
+   and it introduces a spoliation question where none currently exists. The
+   disclosure is a fact to be managed, not concealed.
+5. **Check the sibling repositories** for the same pattern.
+   `khaaliswooden-max/PHRONESIS-1` is likewise public from 2026-06-09 and its
+   roadmap contemplates a provisional filing on the cross-modal compliance
+   fabric. Proteus is a deliberate exception and needs no action: its README
+   states the Apache-2.0 patent grant is *intentional* defensive disclosure,
+   which is a chosen strategy rather than an oversight.
 
 ### 7.2 Export control — unaddressed in all five
 
@@ -449,7 +712,10 @@ exposure asserted from the nature of the artifacts; no legal review performed]
 Five repositories, ephemeral or filesystem-resident keys, no rotation, no
 revocation path, no HSM, and single-attestor commits. The Track A keystore is
 the floor, the Wave 2 HSM is the target, and multi-party attestation is the gap
-the methodology itself names as its largest.
+the methodology itself names as its largest — now specified in §7.6, where the
+distinction that matters is that **attestor keys are generated and held by the
+attestors**, never issued or escrowed by Visionblox. A signature made with a key
+the attested party controls attests to nothing.
 
 ### 7.4 Staffing
 
@@ -472,19 +738,222 @@ channels that would fund Waves 2 and 3. The framework is complete in
 
 ---
 
+### 7.6 Attestation protocol (D6) — RESOLVED as to design; names remain open
+
+**What this section settles, and what it cannot.** D6 asked "who are the
+independent attestors?" The *who* is the principal investigator's to fill and
+nobody else's — proposing named individuals here would be fabrication, and
+putting real people forward without their consent is not a decision an assistant
+gets to make. What is settled below is everything else: the threat model, the
+scheme, what an attestor actually signs, who is eligible, how failure is
+handled, and what it requires of the wire format. D6 therefore stops being an
+open design question and becomes a bounded recruitment task against a written
+specification — **three people, in three named roles.**
+
+#### 7.6.1 Threat model — be precise about what OTS already covers
+
+`EPHEMERIS-1/SECURITY.md` states the gap as key compromise: *"Chain entries are
+signed by a single key controlled by the maintainer. A compromise of that key
+allows producing fake-but-valid-looking new commits (though not retroactive
+ones, given OTS anchoring)."*
+
+Two distinct threats, and OpenTimestamps handles one of them well:
+
+| Threat | Covered by OTS? | Covered by n-of-m? |
+|---|---|---|
+| Retroactive forgery of an earlier commit | **Yes** — Bitcoin anchoring fixes the hash in time | yes |
+| Forged *new* commit after key theft | no — a stolen key signs a valid-looking entry | **yes** |
+| Benchmark shaped by a privately-held solution | no — OTS timestamps an artifact, it does not witness a process | **partially** |
+
+The third row is the one worth being careful about. OTS proves a benchmark hash
+existed at time T, so a solution *published* later is provably later — ZCS-6's
+ordering claim survives on timestamps alone against that case. What a timestamp
+cannot see is an author privately iterating benchmark and solution together
+before T. Only a human who reviewed the artifact at freeze time and declares no
+knowledge of a candidate solution addresses that residual. **Do not oversell
+this**: attestation reduces that risk, it does not eliminate it.
+
+#### 7.6.2 The scheme
+
+**Author signature required and separate, plus 2-of-3 independent attestors.**
+The author's signature never counts toward the threshold — otherwise "2-of-3"
+degrades to one independent signer.
+
+Escalate to **3-of-5** for any benchmark version that backs a federal
+deliverable or an IP filing. Everything else stays at 2-of-3.
+
+The binding constraint here is recruitment, not cryptography —
+`EPHEMERIS-1/GOVERNANCE.md` already flags that this *"requires identifying
+willing attestors"* and calls the effort substantial. 2-of-3 is the smallest
+scheme that materially beats a single signer and still tolerates one attestor
+being unavailable at commit time. Setting it higher buys marginal assurance and
+guarantees the ceremony never runs.
+
+#### 7.6.3 What an attestor signs
+
+Not "this benchmark is good" — that is an unfalsifiable opinion and a burden no
+volunteer should carry. Four clauses, three of them mechanically checkable:
+
+1. "I received the bundle with manifest SHA-256 `<hash>` on `<date>`."
+2. "I independently recomputed the manifest hash from the bundle contents and it
+   matched." *(the bundles already ship `baselines/verify_bundle.py`; this is a
+   command, not an analysis)*
+3. "I reviewed the assertions and the sealed-pool construction and found no
+   evidence of contamination or of a threshold fitted to a known result."
+4. "I have no knowledge of a candidate solution to this benchmark, and no
+   financial interest in Visionblox LLC or Zuup Innovation Lab."
+
+Clause 4 is what buys the third row of §7.6.1. Clause 3 is the only judgment
+call, and it is scoped narrowly enough to be answerable.
+
+#### 7.6.4 Independence criteria
+
+Ineligible: employees or contractors of Visionblox LLC or Zuup Innovation Lab;
+anyone holding a financial interest; anyone who contributed to the benchmark or
+to a candidate solution; and — flagged deliberately — **the principal
+investigator's academic supervisor or thesis committee**, who have a structural
+interest in the work succeeding. That last exclusion will be inconvenient and it
+is the one most worth keeping.
+
+#### 7.6.5 The three roles to recruit
+
+One person per role gives exactly the 2-of-3 quorum.
+
+| Role | What they check | Domain burden |
+|---|---|---|
+| **Process attestor** | Recomputes hashes, verifies signatures, confirms chain linkage. Clauses 1–2. | lowest — recruit first |
+| **Methodology attestor** | Falsification-first design, Goodhart resistance, sealed-pool fairness. Clause 3. | domain-independent; **one person can serve all five repositories** |
+| **Domain attestor** | Whether the assertions are well-posed in the field. Clause 3. | highest, and **per-repository** |
+
+The domain attestor is the only role that does not generalize: planetary and
+time-scale expertise for EPHEMERIS, conformal prediction or test-time adaptation
+for Proteus, DTN and space communications for Caduceus, safety-critical or
+life-support systems for PHRONESIS. Budget five domain attestors across the
+portfolio, one process attestor, and one methodology attestor — **seven people
+total, not fifteen.**
+
+#### 7.6.6 Recruitment channels
+
+Categories, deliberately not individuals:
+
+- **Authors already cited in the papers.** EPHEMERIS cites 35 references and
+  PHRONESIS 45, many by working researchers in exactly the domains above.
+  Contacting a cited author is ordinary academic courtesy and the warmest
+  channel available. [PLAUSIBLE — a normal practice; no outreach attempted]
+- **The reviewer pool of the target venues** the papers are already aimed at.
+- **The reproducible-builds and OpenTimestamps communities**, which are the
+  natural home for the process-attestor role.
+- **SNHU faculty outside the PI's committee**, subject to §7.6.4.
+- **SOSSEC / NSTXL consortium technical members**, already in the capture
+  posture.
+
+#### 7.6.7 Keys, failure modes, and history
+
+**Keys.** Each attestor generates and holds their own Ed25519 key and publishes
+its fingerprint. Attestor keys must never be issued, escrowed, or rotated by
+Visionblox — an attestation signed with a key the attested party controls
+attests to nothing. Attestor public keys live in a signed roster; roster changes
+are themselves chain entries.
+
+**Failure modes, all specified in advance:**
+
+| Condition | Resolution |
+|---|---|
+| One attestor unavailable | 2-of-3 absorbs it; ceremony proceeds |
+| Attestor key lost | Roster-update entry; prior attestations stand |
+| Attestor withdraws consent | Prior attestations are historical facts and stand; removed from future rosters |
+| **Threshold not reached** | **The commit does not happen.** |
+
+That last row is the one that matters. The failure mode is an uncommitted
+benchmark, never a benchmark committed with one signature and a footnote
+explaining why. A ceremony with a documented bypass is not a ceremony.
+
+**Existing single-signed history is not rewritten.** PHRONESIS LEDGER #0001–
+#0005 and Proteus #0004 stay exactly as they are — chains are append-only and
+that rule outranks the desire for a tidy roster. Attestors may instead sign a
+**new, forward-only corroboration entry**: "I verified the chain from genesis to
+entry #N on date D." That records independent review as a fact about a
+verification performed later, without pretending it happened at the time.
+
+#### 7.6.8 Scope — what needs attestation
+
+**Benchmark freezes and benchmark version re-commits only.** Not routine
+solution commits, not documentation changes, not phase-transition records. The
+ceremony exists to protect the artifacts ZCS-6's credibility rests on, and
+attestor goodwill is a finite resource — spend it where the methodology needs
+it.
+
+#### 7.6.9 Dependency — this changes what Track A must build
+
+**D6 has a hard dependency on D4.** A chain-entry schema that holds one
+signature cannot carry an n-of-m attestation set, and discovering that after the
+v1 format ships forces a v2 for purely structural reasons.
+
+**The shared provenance core must model an entry's signatures as a set from the
+start** — author signature distinguished from attestor signatures, threshold
+policy recorded in the entry, attestor key fingerprints resolvable against a
+roster. Building it now costs very little; retrofitting it costs a format
+version. This is recorded in `docs/PROMPT_shared_provenance_core.md` as a
+required schema property.
+
 ## 8. Decisions required before Wave 2
 
 | # | Decision | Owner | Blocks |
 |---|---|---|---|
-| D1 | Does Caduceus M0 block M1? (§7.1) | PI + practitioner | all Caduceus build |
-| D2 | Is EPHEMERIS CSAC a separate Pro SKU? (§6.3) | PI | all EPHEMERIS hardware spend |
-| D3 | Revise the display target, or seek a microLED supplier? (§6.3) | PI | EPHEMERIS BOM |
-| D4 | Canonical encoding for the shared core — deterministic CBOR? (§1.2) | PI + Track A | Track A, then everything |
-| D5 | PHRONESIS radiation path: Class B or mitigated COTS? (§6.2) | PI | v1.0 architecture |
-| D6 | Who are the independent attestors? (§5) | PI | methodology credibility |
+| D1 | ~~Does Caduceus M0 block M1?~~ **DECIDED 2026-08-23: no — M0 blocks *public* M1. Build privately now. Separately: the IP docs have been public since 2026-06-09; practitioner escalation is urgent** (§7.1) | PI — closed; practitioner action open | — |
+| D2 | ~~Is EPHEMERIS CSAC a separate Pro SKU?~~ **DECIDED 2026-08-23: yes — and the Pro variant is out of v1.0 scope per benchmark §6. No CSAC in the v1.0 BOM** (§6.3) | PI — closed | — |
+| D3 | ~~Revise the display target, or seek a microLED supplier?~~ **DECIDED 2026-08-23: neither — the blueprint had a lux→cd/m² units error. Revise to ~3,000 cd/m² and add a ≤1% reflectance line** (§6.3) | PI — closed | — |
+| D4 | ~~Canonical encoding for the shared core~~ **DECIDED 2026-08-23: deterministic CBOR, RFC 8949 §4.2.1** (§1.2) | PI — closed | — |
+| D5 | ~~PHRONESIS radiation path: Class B or mitigated COTS?~~ **DECIDED 2026-08-23: both — rad-hard safety domain, mitigated COTS advisory domain. HF-10 already mandates the split** (§6.2) | PI — closed | — |
+| D6 | ~~Who are the independent attestors?~~ **DECIDED 2026-08-23: protocol settled — author + 2-of-3 independent, three named roles, seven people portfolio-wide. Names remain the PI's to fill** (§7.6) | PI — design closed, recruitment open | benchmark re-commits |
 
-D2 and D4 are on the critical path and are cheap to decide. D1 is legal. D5 can
-wait for Wave 3.
+**D4 is closed, including its sub-decision:** deterministic CBOR per RFC 8949
+§4.2.1, and **no floating-point values in the signed payload**. Confidence and
+alpha become parts-per-million `uint32`; validity timestamps become `uint64`
+microseconds since the Unix epoch (UTC). Rounding is directional and
+conservative — coverage floors, alpha ceils, the validity window narrows from
+both ends — so quantization can never inflate a guarantee. This makes the shared
+core a **v1 format**, with existing float-bearing entries verifying under a `v0`
+legacy tag and never re-signed. Bound in
+`docs/PROMPT_shared_provenance_core.md`.
+
+Two consequences worth tracking. Monotone propagation becomes *exact* — integer
+`min`/`max`/intersection carry none of the float-comparison edge cases, so
+T3/T4/T6 tighten rather than weaken. And the EPHEMERIS peer must convert from
+its internal J2000/TT representation at the envelope boundary, a conversion that
+crosses the leap-second table and is therefore a `DC-6`-class hazard by
+construction (§6.3); the work order flags it at the point of definition.
+
+**D2 and D3 are closed** (§6.3). Both resolved by reading the frozen assertion
+text rather than by revising it: A6 already authorizes the commercial/Pro
+variant split and §6 scopes v1.0 to the commercial variant, and A3's "50,000
+lux" is an ambient-illuminance requirement that the blueprint transcribed as
+display emission. No benchmark file is touched by either.
+
+**D6 is closed as to design** (§7.6) and reduced to recruitment: three roles,
+seven people across the portfolio, against a written attestation statement. It
+also imposes a schema requirement on Track A — an entry's signatures must be
+modelled as a set from the start, or adding attestation later forces a v2 format
+(§7.6.9).
+
+**D5 is closed** (§6.2). It resolved the same way D2 and D3 did — by reading a
+frozen assertion rather than revising one. HF-10 is gating and already requires
+the ML subsystem to be hardware-isolated from the kernel, so two radiation
+domains were never optional and the "Class B or COTS" framing was a false
+binary. It leaves three named unknowns (environment analysis, beam-measured
+cross-sections, and a measured `R_up`), none currently scoped.
+
+**D1 is closed** (§7.1): private development is not disclosure, so M0 gates
+publication of the substrate rather than its construction. Investigating it
+surfaced a more consequential fact — the three PPA drafting targets have been
+publicly readable since the repository's initial commit on 2026-06-09, so the
+arXiv-ordering constraint the plan was built around is no longer the binding
+control. **Practitioner escalation is now the portfolio's most urgent
+non-engineering action.**
+
+**All six decisions are closed.** Two carry open follow-through that is not a
+decision: attestor recruitment under D6, and the practitioner question under D1.
+Both are long-lead and both should start this week.
 
 ---
 
@@ -499,12 +968,20 @@ names what would be needed to upgrade it.
 | 4 chain implementations, 377/258/206/72 lines | measured (line count, direct inspection 2026-08-23) | already a direct observation; record not required |
 | EPHEMERIS A5 ≥14 days on 500 mAh | requirement (benchmark assertion) | n/a — it is a contract |
 | 500 mAh → 1.85 Wh → 5.5 mW average budget | target (derived from a BOM target) | measured cell capacity + a real duty-cycle model |
-| CSAC ≈120 mW continuous | target (vendor datasheet class) | bench measurement of the selected part |
-| Display 50,000 cd/m² peak | target (sketch-only blueprint) | supplier quote or measured panel |
+| CSAC ≈120 mW continuous | target (vendor datasheet class) | moot for v1.0 — CSAC removed by D2 |
+| ~~Display 50,000 cd/m² peak~~ | **withdrawn — units error (lux vs cd/m²), D3** | — |
+| Display ~3,000 cd/m² peak, stack reflectance ≤1% | target (revised BOM) | supplier quote or measured panel |
+| Peak luminance needed for A3 4.5:1 at 50 klx (2,700 / 1,350 / 340 cd/m² by reflectance) | target (first-principles derivation) | rendered A3 audit or physical sunlight measurement |
 | All other BOM values in §6.3 | target | DVT build + measurement |
 | Caduceus 20 weeks / 3.25 FTE | target (planning estimate) | actual burn against M0–M8 |
 | Caduceus ~330 tests | target (planning estimate) | the test suite existing |
 | Portfolio 6–8 FTE | target (additive estimate) | bottom-up staffing model |
+| Advisory-domain availability `A_min = 0.70 / R_up` | requirement (derived from HF-12, gating threshold) | measure `R_up` in the v0.3 calibration audit |
+| Rad-hard parts cannot host a 7B model | target (part-class reasoning, no datasheets accessed) | vendor datasheet confirmation |
+| 200 W × 8 h = 1.6 kWh vs ~0.8–1.2 kWh suit battery | target (Fermi estimate, Check 2) | PLSS power budget from the shell partner |
+| PHRONESIS radiation architecture at TRL 2–3 | measured (analysis-only evidence, per Check 5) | v1.0 beam/TVAC/vibration campaign → TRL 5–6 |
+| Caduceus-1 public since 2026-06-09, commit `1d7bf01`, IP docs included | measured (GitHub API, 2026-08-23) | — |
+| US bar date ≈ 2027-06-09 | target (statutory arithmetic on an assumed operative date) | practitioner determination of the operative date |
 | Orin NX ≤200 W peak | requirement (`CADUCEUS-005 §1.2`) | n/a |
 | Proteus CPU-only mandate | requirement (benchmark §2) | n/a |
 | aletheia-dac 7/7 acceptance tests | measured (independently re-run 2026-08-23, this session) | — |
