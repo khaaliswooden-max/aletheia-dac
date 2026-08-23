@@ -479,11 +479,19 @@ channels that would fund Waves 2 and 3. The framework is complete in
 | D1 | Does Caduceus M0 block M1? (§7.1) | PI + practitioner | all Caduceus build |
 | D2 | Is EPHEMERIS CSAC a separate Pro SKU? (§6.3) | PI | all EPHEMERIS hardware spend |
 | D3 | Revise the display target, or seek a microLED supplier? (§6.3) | PI | EPHEMERIS BOM |
-| D4 | Canonical encoding for the shared core — deterministic CBOR? (§1.2) | PI + Track A | Track A, then everything |
+| D4 | ~~Canonical encoding for the shared core~~ **DECIDED 2026-08-23: deterministic CBOR, RFC 8949 §4.2.1** (§1.2) | PI — closed | — |
 | D5 | PHRONESIS radiation path: Class B or mitigated COTS? (§6.2) | PI | v1.0 architecture |
 | D6 | Who are the independent attestors? (§5) | PI | methodology credibility |
 
-D2 and D4 are on the critical path and are cheap to decide. D1 is legal. D5 can
+**D4 is closed:** deterministic CBOR per RFC 8949 §4.2.1, bound in
+`docs/PROMPT_shared_provenance_core.md`. It carries one open sub-decision for
+Track A — whether floating-point fields may appear in a signed payload at all.
+The current envelope signs four (`Confidence.value`, `Confidence.alpha`,
+`Validity.issued_at`, `Validity.expires_at`); the recommendation is scaled
+integers, which would make the shared core a v1 format with existing entries
+verifying under a v0 legacy tag.
+
+D2 remains on the critical path and is cheap to decide. D1 is legal. D5 can
 wait for Wave 3.
 
 ---

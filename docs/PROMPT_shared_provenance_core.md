@@ -44,12 +44,48 @@ for a decision — do not paper over it.
 ## Deliverables
 
 1. **A versioned wire-format specification** — `docs/WIRE_FORMAT.md` plus a
-   machine-readable schema. Recommended: deterministic CBOR with a CDDL schema
-   (Caduceus has already independently selected `serde` + `ciborium`, so CBOR
-   keeps that plan intact). If you believe another encoding is better, argue for
-   it in the spec with first-principles reasoning; do not silently substitute.
+   machine-readable CDDL schema.
+
+   **The encoding is decided: deterministic CBOR.** This is settled by the
+   principal investigator — do not re-litigate it, do not survey alternatives,
+   do not silently substitute. Caduceus has already independently selected
+   `serde` + `ciborium` (`CADUCEUS-005 §3`), so CBOR keeps that plan intact.
+
+   Bind explicitly to **RFC 8949 §4.2.1 core deterministic encoding**, and state
+   each rule in the spec rather than citing the RFC and moving on:
+   - definite-length encoding only — no indefinite-length items
+   - shortest-form encoding for integers and for all major-type argument lengths
+   - map keys sorted by bytewise lexicographic order of their *encoded* bytes
+   - no duplicate map keys, on encode or decode
+   - decoders reject non-deterministic input rather than accepting and
+     re-canonicalizing it
+
    Must cover: the DAC envelope, the chain entry, canonical field ordering,
    version tagging, and unknown-field handling.
+
+   **Required sub-decision — floats in the signed payload.** The current Python
+   envelope signs four floating-point fields: `Confidence.value`,
+   `Confidence.alpha`, `Validity.issued_at`, and `Validity.expires_at` (the
+   latter two are `time.time()` values). Float canonicalization is the most
+   common way deterministic encoding breaks across languages: RFC 8949 requires
+   the shortest float that round-trips the value, and Python, Rust, and an
+   embedded C target must agree bit-for-bit on that reduction. Many Cortex-M
+   parts have a single-precision FPU or none at all, so the EPHEMERIS peer may
+   not be able to reproduce a `f64` payload at all.
+
+   **Strong recommendation: forbid floats in the signed payload entirely.**
+   Represent confidence and alpha as fixed-point scaled integers (parts-per-
+   million is ample for a coverage level) and timestamps as integer
+   microseconds. EPHEMERIS already uses `uint64` microseconds since J2000 on the
+   hardware side, so this aligns the portfolio rather than adding a convention.
+
+   If you adopt this, the float→integer change alters what gets signed, so it
+   must land as a **v1 format**, with the existing float-bearing entries
+   verifying under the `v0` legacy tag per the hard constraints below. Document
+   the scaling factor, the rounding rule, and the range limits in
+   `docs/WIRE_FORMAT.md`. If you believe floats can be kept safely, make that
+   argument explicitly with the cross-language evidence before building —
+   do not just keep them because they are already there.
 
 2. **A Python reference implementation** in `src/aletheia/provenance/`, with the
    four existing implementations refactored onto it behind adapters that
