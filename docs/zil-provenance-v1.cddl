@@ -1,0 +1,183 @@
+; zil-provenance v1 — machine-readable schema
+;
+; Encoding: deterministic CBOR, RFC 8949 Section 4.2.1 core deterministic
+; encoding requirements, plus the portfolio restrictions in
+; docs/WIRE_FORMAT.md Section 3. Normative prose is in WIRE_FORMAT.md; where
+; this file and that document disagree, WIRE_FORMAT.md governs.
+;
+; Notation note: CDDL cannot express "map keys are sorted by the bytewise order
+; of their encoded form", "no duplicate keys", or "shortest-form arguments".
+; Those are encoding rules R1-R4 and a validator MUST enforce them separately.
+
+start = dac-wire / entry-wire
+
+; ---------------------------------------------------------------------------
+; Wire forms: the signed structure plus its detached signature.
+; ---------------------------------------------------------------------------
+
+; Encoded key order for both wire maps: e, sig
+dac-wire = {
+  "e"   : dac-v1,
+  "sig" : signature-set,     ; over DOMAIN_DAC || cbor(dac-v1)
+}
+
+entry-wire = {
+  "e"   : entry-v1,
+  "sig" : signature-set,     ; over DOMAIN_CHAIN || cbor(entry-v1)
+}
+
+; ---------------------------------------------------------------------------
+; Signature set — n-of-m attestation, modelled from the start.
+;
+; The portfolio has decided on author + 2-of-3 independent attestation for
+; benchmark commits (PORTFOLIO_BUILD_PLAN.md 7.6). A schema holding exactly one
+; signature cannot carry that, and retrofitting it costs a format version.
+; An author signature with zero attestors is a valid instance of this model and
+; is what every substrate emits today.
+;
+; Encoded key order: a, at, th
+; ---------------------------------------------------------------------------
+
+signature-set = {
+  "a"    : attestation,      ; the author. NEVER counts toward the threshold.
+  ? "at" : [+ attestation],  ; independent attestors; omit when empty
+  ? "th" : threshold-policy, ; the policy in force when this entry was sealed
+}
+
+; Attestor entries MUST be sorted by "k" in bytewise ascending order, MUST NOT
+; repeat a key, and MUST NOT contain the author's key. Independence beyond that
+; is a recruitment property (7.6.4) that no encoding can check.
+;
+; Encoded key order: k, r, s
+attestation = {
+  "k"   : ed25519-pubkey,    ; resolvable against the signed roster
+  "s"   : ed25519-signature, ; over the SAME bytes the author signed
+  ? "r" : role,
+}
+
+role = "process" / "methodology" / "domain"
+
+; Recorded IN the entry, not looked up at verification time: a policy that could
+; be edited afterwards would let a 2-of-3 entry be reinterpreted as author-only.
+; "n" counts INDEPENDENT attestors and never includes the author.
+; n <= m is REQUIRED.
+;
+; Encoded key order: m, n, roster
+threshold-policy = {
+  "n"        : uint,         ; independent attestors required (2, or 3 for
+                             ; federal/IP-backing versions)
+  "m"        : uint,         ; roster size the threshold is drawn from
+  ? "roster" : sha256,       ; hash of the signed roster in force
+}
+
+; A roster is a signed list of attestor keys. Roster changes are themselves
+; chain entries: an entry whose "et" is "ROSTER_UPDATE" and whose "ep" is
+; cbor(roster).
+;
+; Encoded key order: e, v  ·  roster-entry: k, id, roles
+roster = {
+  "v" : 1,
+  "e" : [* roster-entry],    ; sorted by "k", bytewise
+}
+
+roster-entry = {
+  "id"    : tstr,
+  "k"     : ed25519-pubkey,
+  "roles" : [* role],        ; sorted
+}
+
+ed25519-signature = bstr .size 64
+sha256            = bstr .size 32
+claim-id          = bstr .size 16          ; UUID, raw bytes
+ed25519-pubkey    = bstr .size 32          ; raw, not DER, not PEM
+ppm               = 0..1000000             ; parts per million
+epoch-us          = 0..253402300799999999  ; microseconds since Unix epoch, UTC
+
+; ---------------------------------------------------------------------------
+; The DAC envelope.
+;
+; Key order in the encoding is fixed by R3 and is, for these keys:
+;   v, id, ph, pk, cls, ext, par, pid, val, conf, hitl, kind, prev
+; Text keys under 24 bytes encode as 0x60+len followed by UTF-8, so the length
+; dominates the bytewise comparison. Sort the ENCODED keys, not the strings.
+; ---------------------------------------------------------------------------
+
+dac-v1 = {
+  "v"    : 1,
+  "id"   : claim-id,
+  "kind" : tstr,
+  "ph"   : sha256,           ; SHA-256 of the payload the claim is about
+  "pid"  : tstr,             ; producer identifier
+  "pk"   : ed25519-pubkey,   ; the producer's key, so the envelope self-verifies
+  "par"  : parent-list,
+  "conf" : confidence-v1,
+  "val"  : validity-v1,
+  "cls"  : classification,
+  "hitl" : bool,
+  "prev" : sha256,           ; predecessor record hash; INSIDE the signature
+  ? "ext": ext-map,
+}
+
+; Parent ids MUST be sorted in bytewise ascending order and MUST NOT repeat, so
+; the same provenance set always encodes to the same bytes. An empty list is a
+; genesis claim and is valid.
+parent-list = [* claim-id]
+
+; 0 PUBLIC, 1 INTERNAL, 2 CONFIDENTIAL, 3 REGULATED.
+; cls == 3 REQUIRES hitl == true. This is a schema invariant, not only a
+; runtime one: a hand-built envelope cannot assert REGULATED without the gate.
+classification = 0..3
+
+; Encoded key order: a, m, v, iv
+confidence-v1 = {
+  "m"    : tstr,             ; "split_conformal" / "aci" / "asserted" / other
+  "v"    : ppm,              ; coverage level; quantized by FLOOR
+  "a"    : ppm,              ; miscoverage rate alpha; quantized by CEIL
+  ? "iv" : [lo: decimal, hi: decimal],
+}
+
+; A decimal fraction as an explicit pair, NOT CBOR tag 4: tags are outside the
+; subset and an embedded-C decoder should not need them. Value = m * 10^e.
+; lo is quantized by FLOOR and hi by CEIL, so an interval only ever widens.
+decimal = [m: int64, e: int]
+int64   = -9223372036854775808..9223372036854775807
+
+; Encoded key order: st, exp, iat, mon
+validity-v1 = {
+  ? "mon" : tstr,            ; drift monitor governing this claim
+  "iat"   : epoch-us,        ; window start; quantized by CEIL
+  "exp"   : epoch-us,        ; window end;   quantized by FLOOR
+  "st"    : status,
+}
+
+; exp >= iat is REQUIRED. A zero-width window is legal and means a claim that
+; was never valid.
+status = "VALID" / "STALE" / "REVOKED"
+
+; ---------------------------------------------------------------------------
+; The chain entry.
+;
+; Key order in the encoding: v, ep, et, ts, ext, seq, prev
+; ---------------------------------------------------------------------------
+
+entry-v1 = {
+  "v"    : 1,
+  "seq"  : uint,
+  "ts"   : epoch-us,
+  "et"   : tstr,             ; event type
+  "ep"   : bstr,             ; OPAQUE payload: attested, never interpreted
+  "prev" : sha256,
+  ? "ext": ext-map,
+}
+
+; ---------------------------------------------------------------------------
+; Extension map.
+;
+; Unknown keys at the TOP level of dac-v1 or entry-v1 MUST be REJECTED. Per-
+; substrate fields go here instead, where they are declared and still signed.
+; Values are subject to the no-float rule; an opaque blob belongs in a bstr.
+; ---------------------------------------------------------------------------
+
+ext-map = {* tstr => ext-value}
+ext-value = uint / nint / bstr / tstr / bool / null
+          / [* ext-value] / {* tstr => ext-value}

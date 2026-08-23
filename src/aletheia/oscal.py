@@ -39,13 +39,22 @@ CONTROL_MAP = {
 def export_assessment_results(store: ClaimStore,
                               chain_ok: Optional[bool] = None,
                               title: str = "Aletheia DAC Assessment Results"):
-    rows = store.db.execute(
-        "SELECT id, json, status, monitor_id FROM claims ORDER BY rowid"
-    ).fetchall()
-
+    # store.rows() renders each stored claim in the legacy field shape,
+    # whatever wire format it was written in, so this exporter reads one
+    # vocabulary across v0 and v1 stores alike.
     observations, findings = [], []
-    for dac_id, j, status, monitor_id in rows:
-        d = json.loads(j)
+    for dac_id, d, status, monitor_id in store.rows():
+        if d is None:                     # unreadable row: report, do not crash
+            findings.append({
+                "uuid": str(uuid.uuid4()),
+                "title": f"Unreadable claim {dac_id[:8]}",
+                "description": "Stored claim could not be decoded; the audit "
+                               "chain for this store is not intact.",
+                "target": {"type": "objective-id",
+                           "target-id": CONTROL_MAP["hash_chain"],
+                           "status": {"state": "not-satisfied"}},
+            })
+            continue
         observations.append({
             "uuid": dac_id,
             "title": f"DAC:{d['kind']}",
