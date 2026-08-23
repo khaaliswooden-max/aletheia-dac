@@ -138,12 +138,20 @@ Proteus v1.0.2 bundle hash and the Caduceus LEDGER #0004 artifacts both await
 operator action. Bitcoin confirmation latency is roughly 6–24 hours, so this is
 wall-clock, not labor.
 
-### 3.4 Engage a registered USPTO patent practitioner
+### 3.4 Engage a registered USPTO patent practitioner — now urgent
 
 `CADUCEUS-PRACTITIONER-001 §5` defines a twelve-step sequence whose **step 1 is
 "identify and engage practitioner."** Three Caduceus PPA skeletons and the
 PHRONESIS cross-modal-fabric PPA all wait on this one person. It is the longest-
 lead non-engineering item in the portfolio and it is not staffed.
+
+**This moved from long-lead to urgent on inspection.** §7.1.2 establishes that
+the three PPA drafting targets have been publicly readable since 2026-06-09. If
+that is the operative disclosure date, a US bar date around **2027-06-09** is
+already running and foreign rights may already be encumbered. The first question
+to the practitioner is no longer claim drafting — it is whether the existing
+public repository constitutes enabling disclosure, and what that does to the
+filing calendar.
 
 ---
 
@@ -589,21 +597,103 @@ per `CADUCEUS-006`. Two proof assistants, two skill sets, one team.
 
 ## 7. Cross-cutting
 
-### 7.1 The IP gate — a decision is required
+### 7.1 The IP gate (D1) — RESOLVED, and overtaken by events
+
+#### 7.1.1 The decision itself
 
 `CADUCEUS-005 §4.1` makes **M0 "PPA filings confirmed"** the entry gate to M1.
 `CADUCEUS-PRACTITIONER-001 §5` step 12 states that beginning the Phase 5
-substrate build is **independent of the IP track**. These two statements
-conflict, and the conflict currently blocks Caduceus.
+substrate build is **independent of the IP track**. Both are right, about
+different things, and the contradiction dissolves on one distinction:
 
-Separately and not in conflict: step 11 requires the arXiv preprint to follow
-PPA filing by at least one business day, to preserve Paris Convention foreign-
-filing rights. That constraint is legal and is not in question — publication
-waits.
+**Private development is not public disclosure. Publication is.**
 
-**Required decision (principal investigator only):** does M0 block M1, or does
-substrate build proceed in parallel with the IP track while publication remains
-gated? This is a legal call and this document does not make it.
+Writing Rust crates discloses nothing to anyone. Pushing them to a public
+Apache-2.0 repository is a disclosure event in the same category as arXiv.
+
+**Decision: M0 does not block M1. M0 blocks *public* M1.** The substrate build
+proceeds now, on a private remote, and the public repository's head stays where
+it is until filings are confirmed. Step 12 is correct as written; §4.1 should be
+read as gating publication of the substrate, not its construction.
+
+#### 7.1.2 The finding that matters more
+
+**The sequencing this plan protects has already been overtaken. [VERIFIED —
+GitHub API, 2026-08-23]**
+
+`khaaliswooden-max/Caduceus-1` is a **public** repository. Its initial commit,
+`1d7bf01` "Caduceus 0", is dated **2026-06-09T20:04:21Z** and already contained
+all three PPA drafting targets under their original filenames:
+
+| Original filename (public since 2026-06-09) | Now |
+|---|---|
+| `Caduceus_IP_Filing_Target_Attack10.md` | `docs/CADUCEUS-IP-001.md` |
+| `Caduceus_IP_002_Attack27.md` | `docs/CADUCEUS-IP-002.md` |
+| `Caduceus_IP_003_F4_Clustering.md` | `docs/CADUCEUS-IP-003.md` |
+
+Also public from that commit: the full bench v1.2.1 specification, the
+CADUCEUS-005 substrate plan, -006, -007, the IEEE paper source, and both
+architecture blueprints. **That is 75 days of public availability as of today.**
+
+This contradicts `Caduceus-1/CLAUDE.md` boundary 4 — *"Nothing from
+`docs/CADUCEUS-IP-*.md` goes to arXiv, a public README, social media, or any
+external channel before the PPA filings are confirmed complete."* A public
+GitHub repository is an external channel. The boundary was written after the
+disclosure it prohibits, so this is not a breach of it by anyone; it is a
+statement that was already untrue when drafted.
+
+#### 7.1.3 What follows — and what is not mine to determine
+
+Every IP document in the repository treats **arXiv as the disclosure event**
+(`CADUCEUS-ARXIV-001` §, `CADUCEUS-IP-001` §, `LEDGER-PREP-001/002`,
+`PROBE-001` P1.6). None asks whether the repository is one. That is the gap.
+
+**A practitioner must determine** whether those documents constitute *enabling*
+disclosure under 35 U.S.C. § 112 for the claimed subject matter. There is a real
+argument either way: `CADUCEUS-IP-001` self-describes as a *"PPA SKELETON — not
+a final filing"* whose *"claim language, enablement disclosure, and prior-art
+positioning are first-principles drafts,"* which may fall short of enablement.
+The bench and substrate-plan documents are considerably more detailed. **This
+document does not make that call and no one should read it as having made it.**
+
+If 2026-06-09 is the operative date, two things follow that the plan does not
+currently track:
+
+- **United States.** 35 U.S.C. § 102(b)(1) grants a 12-month grace period for
+  the inventor's own disclosure, putting the bar date at approximately
+  **2027-06-09**. That clock is running now. [PLAUSIBLE — statutory arithmetic
+  from an assumed operative date; the date itself is a practitioner
+  determination]
+- **Absolute-novelty jurisdictions** (EPO, CN, and most others) provide no
+  such grace. Foreign rights to whatever was enabled may already be forfeited.
+
+**The practical inversion:** step 11's "arXiv must follow PPA by one business
+day" was written to protect pristine foreign-filing rights. If those rights were
+already encumbered on 2026-06-09, that instruction is guarding a door that may
+already be open, while the thing that actually binds — a US bar date roughly ten
+months out — is tracked nowhere. **Filing urgency is now the live issue;
+publication ordering is the secondary one.** The ordering constraint still
+stands and should still be honored; it is simply no longer the load-bearing
+control.
+
+#### 7.1.4 Actions
+
+1. **Proceed with M1** on a private remote, per §7.1.1.
+2. **Escalate to the practitioner as the priority item**, supplying the date
+   `2026-06-09`, the commit `1d7bf01`, and the file list above. This is now the
+   first question to put to them, ahead of claim drafting.
+3. **Track 2027-06-09 as a provisional US bar date** until a practitioner
+   replaces it with a real one.
+4. **Do not delete or force-push the history.** Removal does not undo
+   disclosure — forks, clones, archives, and the public event stream persist —
+   and it introduces a spoliation question where none currently exists. The
+   disclosure is a fact to be managed, not concealed.
+5. **Check the sibling repositories** for the same pattern.
+   `khaaliswooden-max/PHRONESIS-1` is likewise public from 2026-06-09 and its
+   roadmap contemplates a provisional filing on the cross-modal compliance
+   fabric. Proteus is a deliberate exception and needs no action: its README
+   states the Apache-2.0 patent grant is *intentional* defensive disclosure,
+   which is a chosen strategy rather than an oversight.
 
 ### 7.2 Export control — unaddressed in all five
 
@@ -810,7 +900,7 @@ required schema property.
 
 | # | Decision | Owner | Blocks |
 |---|---|---|---|
-| D1 | Does Caduceus M0 block M1? (§7.1) | PI + practitioner | all Caduceus build |
+| D1 | ~~Does Caduceus M0 block M1?~~ **DECIDED 2026-08-23: no — M0 blocks *public* M1. Build privately now. Separately: the IP docs have been public since 2026-06-09; practitioner escalation is urgent** (§7.1) | PI — closed; practitioner action open | — |
 | D2 | ~~Is EPHEMERIS CSAC a separate Pro SKU?~~ **DECIDED 2026-08-23: yes — and the Pro variant is out of v1.0 scope per benchmark §6. No CSAC in the v1.0 BOM** (§6.3) | PI — closed | — |
 | D3 | ~~Revise the display target, or seek a microLED supplier?~~ **DECIDED 2026-08-23: neither — the blueprint had a lux→cd/m² units error. Revise to ~3,000 cd/m² and add a ≤1% reflectance line** (§6.3) | PI — closed | — |
 | D4 | ~~Canonical encoding for the shared core~~ **DECIDED 2026-08-23: deterministic CBOR, RFC 8949 §4.2.1** (§1.2) | PI — closed | — |
@@ -853,9 +943,17 @@ domains were never optional and the "Class B or COTS" framing was a false
 binary. It leaves three named unknowns (environment analysis, beam-measured
 cross-sections, and a measured `R_up`), none currently scoped.
 
-**D1 is the only decision still open**, and it is legal rather than technical.
-Recruitment under D6 should start immediately: it is the longest-lead item that
-costs nothing to begin.
+**D1 is closed** (§7.1): private development is not disclosure, so M0 gates
+publication of the substrate rather than its construction. Investigating it
+surfaced a more consequential fact — the three PPA drafting targets have been
+publicly readable since the repository's initial commit on 2026-06-09, so the
+arXiv-ordering constraint the plan was built around is no longer the binding
+control. **Practitioner escalation is now the portfolio's most urgent
+non-engineering action.**
+
+**All six decisions are closed.** Two carry open follow-through that is not a
+decision: attestor recruitment under D6, and the practitioner question under D1.
+Both are long-lead and both should start this week.
 
 ---
 
@@ -882,6 +980,8 @@ names what would be needed to upgrade it.
 | Rad-hard parts cannot host a 7B model | target (part-class reasoning, no datasheets accessed) | vendor datasheet confirmation |
 | 200 W × 8 h = 1.6 kWh vs ~0.8–1.2 kWh suit battery | target (Fermi estimate, Check 2) | PLSS power budget from the shell partner |
 | PHRONESIS radiation architecture at TRL 2–3 | measured (analysis-only evidence, per Check 5) | v1.0 beam/TVAC/vibration campaign → TRL 5–6 |
+| Caduceus-1 public since 2026-06-09, commit `1d7bf01`, IP docs included | measured (GitHub API, 2026-08-23) | — |
+| US bar date ≈ 2027-06-09 | target (statutory arithmetic on an assumed operative date) | practitioner determination of the operative date |
 | Orin NX ≤200 W peak | requirement (`CADUCEUS-005 §1.2`) | n/a |
 | Proteus CPU-only mandate | requirement (benchmark §2) | n/a |
 | aletheia-dac 7/7 acceptance tests | measured (independently re-run 2026-08-23, this session) | — |
