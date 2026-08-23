@@ -483,13 +483,22 @@ channels that would fund Waves 2 and 3. The framework is complete in
 | D5 | PHRONESIS radiation path: Class B or mitigated COTS? (§6.2) | PI | v1.0 architecture |
 | D6 | Who are the independent attestors? (§5) | PI | methodology credibility |
 
-**D4 is closed:** deterministic CBOR per RFC 8949 §4.2.1, bound in
-`docs/PROMPT_shared_provenance_core.md`. It carries one open sub-decision for
-Track A — whether floating-point fields may appear in a signed payload at all.
-The current envelope signs four (`Confidence.value`, `Confidence.alpha`,
-`Validity.issued_at`, `Validity.expires_at`); the recommendation is scaled
-integers, which would make the shared core a v1 format with existing entries
-verifying under a v0 legacy tag.
+**D4 is closed, including its sub-decision:** deterministic CBOR per RFC 8949
+§4.2.1, and **no floating-point values in the signed payload**. Confidence and
+alpha become parts-per-million `uint32`; validity timestamps become `uint64`
+microseconds since the Unix epoch (UTC). Rounding is directional and
+conservative — coverage floors, alpha ceils, the validity window narrows from
+both ends — so quantization can never inflate a guarantee. This makes the shared
+core a **v1 format**, with existing float-bearing entries verifying under a `v0`
+legacy tag and never re-signed. Bound in
+`docs/PROMPT_shared_provenance_core.md`.
+
+Two consequences worth tracking. Monotone propagation becomes *exact* — integer
+`min`/`max`/intersection carry none of the float-comparison edge cases, so
+T3/T4/T6 tighten rather than weaken. And the EPHEMERIS peer must convert from
+its internal J2000/TT representation at the envelope boundary, a conversion that
+crosses the leap-second table and is therefore a `DC-6`-class hazard by
+construction (§6.3); the work order flags it at the point of definition.
 
 D2 remains on the critical path and is cheap to decide. D1 is legal. D5 can
 wait for Wave 3.

@@ -63,29 +63,66 @@ for a decision — do not paper over it.
    Must cover: the DAC envelope, the chain entry, canonical field ordering,
    version tagging, and unknown-field handling.
 
-   **Required sub-decision — floats in the signed payload.** The current Python
-   envelope signs four floating-point fields: `Confidence.value`,
+   **No floating-point values in the signed payload. Decided.** This is
+   settled by the principal investigator alongside the encoding — do not
+   re-litigate it and do not preserve a float because it is already there.
+
+   The current Python envelope signs four floats: `Confidence.value`,
    `Confidence.alpha`, `Validity.issued_at`, and `Validity.expires_at` (the
-   latter two are `time.time()` values). Float canonicalization is the most
-   common way deterministic encoding breaks across languages: RFC 8949 requires
-   the shortest float that round-trips the value, and Python, Rust, and an
-   embedded C target must agree bit-for-bit on that reduction. Many Cortex-M
-   parts have a single-precision FPU or none at all, so the EPHEMERIS peer may
-   not be able to reproduce a `f64` payload at all.
+   latter two are `time.time()` values). Deterministic CBOR requires the
+   shortest float that round-trips the value, and Python, Rust, and embedded C
+   would all have to agree bit-for-bit on that reduction. Many Cortex-M parts
+   have a single-precision FPU or none at all, so the EPHEMERIS peer could not
+   reliably reproduce an `f64` payload. Scaled integers remove the whole class
+   of defect.
 
-   **Strong recommendation: forbid floats in the signed payload entirely.**
-   Represent confidence and alpha as fixed-point scaled integers (parts-per-
-   million is ample for a coverage level) and timestamps as integer
-   microseconds. EPHEMERIS already uses `uint64` microseconds since J2000 on the
-   hardware side, so this aligns the portfolio rather than adding a convention.
+   Representation:
 
-   If you adopt this, the float→integer change alters what gets signed, so it
-   must land as a **v1 format**, with the existing float-bearing entries
-   verifying under the `v0` legacy tag per the hard constraints below. Document
-   the scaling factor, the rounding rule, and the range limits in
-   `docs/WIRE_FORMAT.md`. If you believe floats can be kept safely, make that
-   argument explicitly with the cross-language evidence before building —
-   do not just keep them because they are already there.
+   | Field | Type | Scale | Rounding |
+   |---|---|---|---|
+   | `confidence.value` | `uint32` | parts-per-million; `1.0` = `1_000_000` | **floor** |
+   | `confidence.alpha` | `uint32` | parts-per-million | **ceil** |
+   | `validity.issued_at` | `uint64` | us since Unix epoch (UTC) | **ceil** |
+   | `validity.expires_at` | `uint64` | us since Unix epoch (UTC) | **floor** |
+
+   **The rounding directions are load-bearing, not stylistic.** Every one
+   rounds in the direction that weakens the claim, so quantization can never
+   inflate a guarantee:
+
+   - coverage floors down — quantization never overstates confidence;
+   - alpha ceils up — never understates the miscoverage rate;
+   - the validity window narrows from both ends — never extends validity.
+
+   State this rule in `docs/WIRE_FORMAT.md` and give it a test. It composes
+   correctly with monotone propagation, and it makes that propagation *exact*:
+   `min` / `max` / interval intersection on integers have none of the
+   comparison edge cases the float versions carry. Confirm T3/T4/T6 still pass
+   and note in the spec that they are now exact rather than approximate.
+
+   **Epoch — resolve this conflict explicitly.** The envelope timestamp is
+   **microseconds since the Unix epoch, UTC**. Provenance timestamps are
+   wall-clock event times shared across all five substrates, so the envelope
+   takes the universal convention. EPHEMERIS uses `uint64` microseconds since
+   **J2000 in TT** internally; that is a domain-specific choice for its
+   astronomical payload and it stays internal. The peer converts at the envelope
+   boundary.
+
+   **That conversion is not a fixed offset.** TT-to-UTC crosses the leap-second
+   table, which is exactly the class of defect EPHEMERIS already found and drove
+   back into its benchmark as `DC-6` (a constant `TAI-UTC = 37` assumption that
+   silently corrupted pre-2017 epochs for every body). Do not reintroduce it.
+   The conversion must use the IERS Bulletin C table the device already carries,
+   and pre-1972 epochs must signal out-of-scope rather than compute silently,
+   per assertion A1d. Call this hazard out in `docs/WIRE_FORMAT.md` where the
+   epoch is defined, so the next implementer meets it before writing the
+   conversion rather than after.
+
+   Because what gets signed changes, this lands as the **v1 format**. Existing
+   float-bearing entries verify under the `v0` legacy tag per the hard
+   constraints below — never re-signed, never migrated. Document scale factors,
+   rounding rules, range limits, and overflow behavior in
+   `docs/WIRE_FORMAT.md`, and include conformance vectors that pin each rounding
+   direction at a boundary value.
 
 2. **A Python reference implementation** in `src/aletheia/provenance/`, with the
    four existing implementations refactored onto it behind adapters that
